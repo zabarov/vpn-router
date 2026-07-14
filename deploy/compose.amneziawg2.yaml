@@ -1,4 +1,20 @@
 services:
+  vpn-router-egress:
+    image: tailscale/tailscale:stable
+    container_name: ${VPN_ROUTER_EGRESS_SERVICE_NAME:-vpn-router-egress}
+    hostname: ${VPN_ROUTER_EGRESS_SERVICE_NAME:-vpn-router-egress}
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${VPN_ROUTER_TAILSCALE_AUTH_KEY:?Set VPN_ROUTER_TAILSCALE_AUTH_KEY}
+      TS_EXTRA_ARGS: --exit-node=${VPN_ROUTER_TAILSCALE_EXIT_NODE:?Set VPN_ROUTER_TAILSCALE_EXIT_NODE}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SOCKS5_SERVER: 0.0.0.0:1055
+    volumes:
+      - ${VPN_ROUTER_EGRESS_STATE_DIRECTORY:-/var/lib/vpn-router/egress-tailscale}:/var/lib/tailscale
+    networks:
+      - egress_network
+
   vpn-router-dns:
     build:
       context: ./dnsmasq
@@ -23,3 +39,8 @@ services:
       - ${VPN_ROUTER_SING_BOX_CONFIG:?Set VPN_ROUTER_SING_BOX_CONFIG}:/etc/sing-box/config.json:ro
       - ${VPN_ROUTER_STATE_DIRECTORY:-/var/lib/vpn-router/tailscale}:/var/lib/vpn-router/tailscale
     command: ["-C", "/etc/sing-box", "run"]
+
+networks:
+  egress_network:
+    external: true
+    name: ${VPN_ROUTER_EGRESS_NETWORK:?Set VPN_ROUTER_EGRESS_NETWORK to the Amnezia container network}

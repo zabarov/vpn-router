@@ -78,11 +78,12 @@ export function validateConfig(config) {
 
   for (const egress of config.egresses) {
     if (!isObject(egress)) continue;
-    if (!['direct', 'tailscale'].includes(egress.type)) errors.push(`egress ${egress.tag ?? '<unknown>'} has an unsupported type`);
-    if (egress.type === 'tailscale') {
-      if (typeof egress.state_directory !== 'string' || !egress.state_directory.startsWith('/')) errors.push(`Tailscale egress ${egress.tag} requires an absolute state_directory`);
+    if (!['direct', 'tailscale_socks'].includes(egress.type)) errors.push(`egress ${egress.tag ?? '<unknown>'} has an unsupported type`);
+    if (egress.type === 'tailscale_socks') {
       if (!environmentNamePattern.test(egress.auth_key_env ?? '')) errors.push(`Tailscale egress ${egress.tag} requires auth_key_env, not a credential value`);
       if (typeof egress.exit_node !== 'string' || egress.exit_node.length === 0) errors.push(`Tailscale egress ${egress.tag} requires exit_node`);
+      if (typeof egress.proxy_server !== 'string' || egress.proxy_server.length === 0) errors.push(`Tailscale egress ${egress.tag} requires proxy_server`);
+      if (!Number.isInteger(egress.proxy_port) || egress.proxy_port < 1 || egress.proxy_port > 65535) errors.push(`Tailscale egress ${egress.tag} requires proxy_port`);
     }
   }
 

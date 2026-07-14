@@ -70,8 +70,9 @@ replace the host default route.
 NAT. It also means that a replacement of the source container requires a
 sidecar restart and renewed health check.
 
-The template must be invoked with an explicit source container name and a
-local generated configuration path. For a managed domain policy it also needs
+The template must be invoked with an explicit source container name, the
+Docker network shared by the Amnezia container and the isolated Tailscale
+egress sidecar, and a local generated configuration path. For a managed domain policy it also needs
 `VPN_ROUTER_DNSMASQ_CONFIG`; the DNS sidecar shares the VPN source namespace
 and has `NET_ADMIN` solely to update this project's named nftables sets. It
 contains neither a server hostname nor a credential.

@@ -9,7 +9,7 @@ function validConfig() {
     capture: { type: 'tproxy', listen_port: 12345 },
     egresses: [
       { tag: 'direct', type: 'direct' },
-      { tag: 'regional-exit', type: 'tailscale', state_directory: '/var/lib/vpn-router/tailscale', auth_key_env: 'VPN_ROUTER_TAILSCALE_AUTH_KEY', exit_node: 'regional-exit.example.ts.net' }
+      { tag: 'regional-exit', type: 'tailscale_socks', auth_key_env: 'VPN_ROUTER_TAILSCALE_AUTH_KEY', exit_node: 'regional-exit.example.ts.net', proxy_server: 'vpn-router-egress', proxy_port: 1055 }
     ],
     destination_sets: { 'regional-services': { ip_cidrs: ['203.0.113.0/24'] } },
     policies: [

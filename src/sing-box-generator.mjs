@@ -8,28 +8,16 @@ function destinationSuffixes(config, names) {
   return names.flatMap((name) => name === 'default' ? [] : (config.destination_sets[name].domain_suffixes ?? []));
 }
 
-export function generateSingBoxConfig(config, { authKeys = {} } = {}) {
+export function generateSingBoxConfig(config) {
   const validation = validateConfig(config);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
 
-  const endpoints = config.egresses
-    .filter((egress) => egress.type === 'tailscale')
-    .map((egress) => {
-      const endpoint = {
-        type: 'tailscale',
-        tag: egress.tag,
-        state_directory: egress.state_directory,
-        hostname: config.resources.service_name,
-        exit_node: egress.exit_node,
-        system_interface: false
-      };
-      if (authKeys[egress.auth_key_env]) endpoint.auth_key = authKeys[egress.auth_key_env];
-      return endpoint;
-    });
-
   const outbounds = [
     { type: 'direct', tag: 'direct' },
-    { type: 'block', tag: 'block' }
+    { type: 'block', tag: 'block' },
+    ...config.egresses.filter((egress) => egress.type === 'tailscale_socks').map((egress) => ({
+      type: 'socks', tag: egress.tag, server: egress.proxy_server, server_port: egress.proxy_port
+    }))
   ];
 
   const routeRules = [];
@@ -59,7 +47,6 @@ export function generateSingBoxConfig(config, { authKeys = {} } = {}) {
       listen_port: config.capture.listen_port,
       network: 'tcp'
     }],
-    endpoints,
     outbounds,
     route: { rules: routeRules, final: 'direct' }
   };

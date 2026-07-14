@@ -81,10 +81,11 @@
       "required": ["tag", "type"],
       "properties": {
         "tag": { "$ref": "#/$defs/tag" },
-        "type": { "enum": ["direct", "tailscale"] },
-        "state_directory": { "type": "string", "pattern": "^/" },
+        "type": { "enum": ["direct", "tailscale_socks"] },
         "auth_key_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" },
-        "exit_node": { "type": "string", "minLength": 1 }
+        "exit_node": { "type": "string", "minLength": 1 },
+        "proxy_server": { "type": "string", "minLength": 1 },
+        "proxy_port": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
     },
     "policy": {

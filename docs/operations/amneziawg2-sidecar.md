@@ -7,9 +7,12 @@ the Amnezia Docker container. NAT then changes those source addresses before
 the host can inspect them. A host-only router therefore cannot reliably apply
 client-subnet policy.
 
-The VPN Router runtime must join the existing Amnezia container network
-namespace. The sidecar observes traffic on `awg0`, applies its owned policy
-resources, and sends selected traffic to its configured egress adapter.
+The capture and DNS sidecars join the existing Amnezia container network
+namespace. The Tailscale exit sidecar deliberately does not: it joins the same
+Docker network as Amnezia but keeps its own network namespace and exposes a
+userspace SOCKS5 listener. The router sends only selected traffic to that
+listener. This separation prevents an exit-node route from replacing the
+Amnezia namespace default route.
 
 ## Read-only preflight
 

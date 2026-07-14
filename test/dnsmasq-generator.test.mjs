@@ -6,7 +6,7 @@ const config = {
   schema_version: '1.0',
   sources: [{ tag: 'amnezia-in', type: 'amneziawg2_container', container_name: 'amnezia-awg2', interface: 'awg0', client_subnet: '10.8.1.0/24' }],
   capture: { type: 'tproxy', listen_port: 12345 },
-  egresses: [{ tag: 'direct', type: 'direct' }, { tag: 'regional-exit', type: 'tailscale', state_directory: '/var/lib/vpn-router/tailscale', auth_key_env: 'VPN_ROUTER_TAILSCALE_AUTH_KEY', exit_node: 'regional-exit.example.ts.net' }],
+  egresses: [{ tag: 'direct', type: 'direct' }, { tag: 'regional-exit', type: 'tailscale_socks', auth_key_env: 'VPN_ROUTER_TAILSCALE_AUTH_KEY', exit_node: 'regional-exit.example.ts.net', proxy_server: 'vpn-router-egress', proxy_port: 1055 }],
   policies: [{ tag: 'selected', source: 'amnezia-in', destination_sets: ['regional-services'], egress: 'regional-exit', failure_mode: 'block' }, { tag: 'default', source: 'amnezia-in', destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }],
   destination_sets: { 'regional-services': { domain_suffixes: ['.ru', '.xn--p1ai', '.su'] } },
   traffic_handling: { udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed' },

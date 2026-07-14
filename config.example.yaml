@@ -15,10 +15,11 @@ egresses:
   - tag: direct
     type: direct
   - tag: regional-exit
-    type: tailscale
-    state_directory: /var/lib/vpn-router/tailscale
+    type: tailscale_socks
     auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
     exit_node: regional-exit.example.ts.net
+    proxy_server: vpn-router-egress
+    proxy_port: 1055
 
 policies:
   - tag: selected-regional-services
