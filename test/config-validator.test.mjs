@@ -25,6 +25,18 @@ test('accepts the safe reference topology', () => {
   assert.deepEqual(validateConfig(validConfig()), { valid: true, errors: [] });
 });
 
+test('accepts a provider-neutral Linux interface source', () => {
+  const config = validConfig();
+  config.sources[0] = {
+    tag: 'generic-vpn',
+    type: 'linux_interface',
+    interface: 'wg0',
+    client_subnet: '10.8.1.0/24'
+  };
+  config.policies.forEach((policy) => { policy.source = 'generic-vpn'; });
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
 test('rejects a strict direct fallback', () => {
   const config = validConfig();
   config.policies[0].egress = 'direct';

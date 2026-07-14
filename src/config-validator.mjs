@@ -70,8 +70,10 @@ export function validateConfig(config) {
 
   for (const source of config.sources) {
     if (!isObject(source)) continue;
-    if (source.type !== 'amneziawg2_container') errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
-    if (typeof source.container_name !== 'string' || source.container_name.length === 0) errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
+    if (!['amneziawg2_container', 'linux_interface'].includes(source.type)) errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
+    if (source.type === 'amneziawg2_container' && (typeof source.container_name !== 'string' || source.container_name.length === 0)) {
+      errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
+    }
     if (typeof source.interface !== 'string' || source.interface.length === 0) errors.push(`source ${source.tag ?? '<unknown>'} requires interface`);
     if (!validCidr(source.client_subnet)) errors.push(`source ${source.tag ?? '<unknown>'} has an invalid client_subnet`);
   }

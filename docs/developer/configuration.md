@@ -49,6 +49,18 @@ interface name (`awg0` for the first verified topology), and the client CIDR.
 The eventual runtime places the capture component in that container network
 namespace.
 
+## Generic Linux interface source
+
+A `linux_interface` source requires only an interface name and client CIDR.
+It is for WireGuard, OpenVPN, IPsec, or another VPN implementation when the
+router's nftables and capture processes can run in the same Linux network
+namespace as that interface. It has no provider-specific container assumption.
+
+This repository currently ships a Compose deployment adapter only for
+`amneziawg2_container`. A `linux_interface` deployment needs an
+operator-owned runtime adapter, but it uses the same validated policy,
+nftables, DNS, and egress contracts.
+
 ## Capture and destinations
 
 The initial runtime uses Linux TPROXY. `capture.listen_port` is the port that

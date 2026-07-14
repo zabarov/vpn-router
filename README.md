@@ -9,11 +9,11 @@ Its first target topology is:
 VPN client -> AmneziaWG 2 container -> VPN Router sidecar -> isolated SOCKS5 proxy -> Tailscale exit node
 ```
 
-The router is deliberately adapter-based. AmneziaWG 2 is the first traffic
-source adapter and Tailscale is the first egress adapter; neither is baked into
-the core policy model. The Tailscale adapter is intentionally isolated from the
-VPN container namespace so an exit-node route cannot replace the VPN's own
-default route.
+The router is deliberately adapter-based. AmneziaWG 2 and a generic Linux
+network interface are the initial traffic source adapters, while Tailscale is
+the first egress adapter; none is baked into the core policy model. The
+Tailscale adapter is intentionally isolated from the VPN container namespace so
+an exit-node route cannot replace the VPN's own default route.
 
 > Status: pre-alpha. This repository currently provides the configuration
 > contract, examples, and local validation tooling. It does not yet install or
