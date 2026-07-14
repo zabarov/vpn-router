@@ -21,3 +21,8 @@ test('generates a no-secret TPROXY and Tailscale endpoint contract', () => {
   assert.equal(JSON.stringify(generated).includes('VPN_ROUTER_TAILSCALE_AUTH_KEY'), false);
   assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'direct' });
 });
+
+test('includes an auth key only when explicitly supplied by the deployment boundary', () => {
+  const generated = generateSingBoxConfig(config, { authKeys: { VPN_ROUTER_TAILSCALE_AUTH_KEY: 'test-only-auth-key' } });
+  assert.equal(generated.endpoints[0].auth_key, 'test-only-auth-key');
+});

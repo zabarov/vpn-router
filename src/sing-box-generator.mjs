@@ -4,20 +4,24 @@ function destinationCidrs(config, names) {
   return names.flatMap((name) => name === 'default' ? [] : config.destination_sets[name].ip_cidrs);
 }
 
-export function generateSingBoxConfig(config) {
+export function generateSingBoxConfig(config, { authKeys = {} } = {}) {
   const validation = validateConfig(config);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
 
   const endpoints = config.egresses
     .filter((egress) => egress.type === 'tailscale')
-    .map((egress) => ({
-      type: 'tailscale',
-      tag: egress.tag,
-      state_directory: egress.state_directory,
-      hostname: config.resources.service_name,
-      exit_node: egress.exit_node,
-      system_interface: false
-    }));
+    .map((egress) => {
+      const endpoint = {
+        type: 'tailscale',
+        tag: egress.tag,
+        state_directory: egress.state_directory,
+        hostname: config.resources.service_name,
+        exit_node: egress.exit_node,
+        system_interface: false
+      };
+      if (authKeys[egress.auth_key_env]) endpoint.auth_key = authKeys[egress.auth_key_env];
+      return endpoint;
+    });
 
   const outbounds = [
     { type: 'direct', tag: 'direct' },

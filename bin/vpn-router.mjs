@@ -8,12 +8,12 @@ import { generateSingBoxConfig } from '../src/sing-box-generator.mjs';
 import { generateNftablesConfig } from '../src/nftables-generator.mjs';
 
 function usage() {
-  return 'Usage: vpn-router validate --config <path>';
+  return 'Usage: vpn-router <validate|render-sing-box|render-nftables> --config <path> [--include-auth-key-from-env]';
 }
 
 async function main(argv) {
-  const [command, option, configPath] = argv;
-  if (!['validate', 'render-sing-box', 'render-nftables'].includes(command) || option !== '--config' || !configPath) {
+  const [command, option, configPath, authOption] = argv;
+  if (!['validate', 'render-sing-box', 'render-nftables'].includes(command) || option !== '--config' || !configPath || (authOption && authOption !== '--include-auth-key-from-env') || (authOption && command !== 'render-sing-box')) {
     throw new Error(usage());
   }
 
@@ -35,7 +35,15 @@ async function main(argv) {
     process.stdout.write(generateNftablesConfig(document.toJS()));
     return;
   }
-  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS()), null, 2)}\n`);
+  const authKeys = {};
+  if (authOption) {
+    for (const egress of document.toJS().egresses.filter((egress) => egress.type === 'tailscale')) {
+      const authKey = process.env[egress.auth_key_env];
+      if (!authKey) throw new Error(`Missing required environment variable: ${egress.auth_key_env}`);
+      authKeys[egress.auth_key_env] = authKey;
+    }
+  }
+  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS(), { authKeys }), null, 2)}\n`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

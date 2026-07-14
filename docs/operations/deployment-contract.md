@@ -12,10 +12,21 @@ node bin/vpn-router.mjs render-sing-box --config ./router.yaml > ./sing-box.json
 node bin/vpn-router.mjs render-nftables --config ./router.yaml > ./vpn-router.nft
 ```
 
-The generated sing-box file has no credential value. A Tailscale node may use
-an existing state directory or be enrolled through an operator-approved
-mechanism. Do not commit either state or a rendered file containing an auth
-key.
+The normal generated sing-box file has no credential value. For a first,
+non-interactive enrollment only, the operator may explicitly render a local
+one-time file from an environment variable:
+
+```sh
+VPN_ROUTER_TAILSCALE_AUTH_KEY='...' \
+  node bin/vpn-router.mjs render-sing-box --config ./router.yaml \
+  --include-auth-key-from-env > ./sing-box.initial.json
+chmod 600 ./sing-box.initial.json
+```
+
+Start the sidecar once with that file, wait until the Tailscale state directory
+contains an enrolled node, then replace it with the normal no-secret rendered
+file and securely remove the initial file. Never commit either the state
+directory or a rendered file containing an auth key.
 
 ## Owned resources
 
