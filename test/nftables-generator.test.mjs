@@ -20,5 +20,6 @@ test('generates an owned strict-only TPROXY table', () => {
   assert.match(generated, /iifname "awg0" udp dport 53 redirect to :5353/);
   assert.match(generated, /iifname "awg0" ip daddr @set_regional_services meta l4proto tcp tproxy ip to :12345 meta mark set 8192 accept/);
   assert.match(generated, /iifname "awg0" udp dport 443 reject/);
+  assert.match(generated, /iifname "awg0" ip6 daddr ::\/0 reject/);
   assert.doesNotMatch(generated, /flush ruleset/);
 });

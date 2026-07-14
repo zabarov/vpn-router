@@ -45,7 +45,7 @@ export function generateNftablesConfig(config) {
       if (ipv4.length > 0 || suffixes.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
     }
     if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" udp dport 443 reject`);
-    if (config.traffic_handling.ipv6 === 'reject') lines.push(`    iifname "${source.interface}" meta nfproto ipv6 reject`);
+    if (config.traffic_handling.ipv6 === 'reject') lines.push(`    iifname "${source.interface}" ip6 daddr ::/0 reject`);
   }
   lines.push('  }');
   lines.push('}');
