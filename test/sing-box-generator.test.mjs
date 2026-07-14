@@ -18,6 +18,7 @@ test('generates a TPROXY and isolated Tailscale SOCKS egress contract', () => {
   assert.equal(generated.inbounds[0].type, 'tproxy');
   assert.equal(generated.inbounds[0].listen_port, 12345);
   assert.deepEqual(generated.outbounds.find((outbound) => outbound.tag === 'regional-exit'), { type: 'socks', tag: 'regional-exit', server: 'vpn-router-egress', server_port: 1055 });
+  assert.doesNotMatch(JSON.stringify(generated), /VPN_ROUTER_TAILSCALE_AUTH_KEY|exit_node/);
   assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'block' });
 });
 

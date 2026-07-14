@@ -5,7 +5,8 @@ services:
     hostname: ${VPN_ROUTER_EGRESS_SERVICE_NAME:-vpn-router-egress}
     restart: unless-stopped
     environment:
-      TS_AUTHKEY: ${VPN_ROUTER_TAILSCALE_AUTH_KEY:?Set VPN_ROUTER_TAILSCALE_AUTH_KEY}
+      # Required only for first enrollment. Once state exists, keep this unset.
+      TS_AUTHKEY: ${VPN_ROUTER_TAILSCALE_AUTH_KEY:-}
       TS_EXTRA_ARGS: --exit-node=${VPN_ROUTER_TAILSCALE_EXIT_NODE:?Set VPN_ROUTER_TAILSCALE_EXIT_NODE}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"

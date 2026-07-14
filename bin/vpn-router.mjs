@@ -9,12 +9,12 @@ import { generateNftablesConfig } from '../src/nftables-generator.mjs';
 import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq> --config <path> [--include-auth-key-from-env]';
+  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq> --config <path>';
 }
 
 async function main(argv) {
-  const [command, option, configPath, authOption] = argv;
-  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq'].includes(command) || option !== '--config' || !configPath || (authOption && authOption !== '--include-auth-key-from-env') || (authOption && command !== 'render-sing-box')) {
+  const [command, option, configPath, ...extraArgs] = argv;
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq'].includes(command) || option !== '--config' || !configPath || extraArgs.length > 0) {
     throw new Error(usage());
   }
 
@@ -40,15 +40,7 @@ async function main(argv) {
     process.stdout.write(generateDnsmasqConfig(document.toJS()));
     return;
   }
-  const authKeys = {};
-  if (authOption) {
-    for (const egress of document.toJS().egresses.filter((egress) => egress.type === 'tailscale')) {
-      const authKey = process.env[egress.auth_key_env];
-      if (!authKey) throw new Error(`Missing required environment variable: ${egress.auth_key_env}`);
-      authKeys[egress.auth_key_env] = authKey;
-    }
-  }
-  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS(), { authKeys }), null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS()), null, 2)}\n`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

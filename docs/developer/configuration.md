@@ -28,6 +28,20 @@ Use an environment-variable name such as `VPN_ROUTER_TAILSCALE_AUTH_KEY`; do
 not put its value in YAML. The example configuration contains only names and
 non-routable documentation placeholders.
 
+## Tailscale SOCKS egress
+
+A `tailscale_socks` egress has two separate responsibilities:
+
+- `proxy_server` and `proxy_port` identify the isolated SOCKS5 service that
+  the router connects to.
+- `auth_key_env` and `exit_node` are deployment inputs for that isolated
+  Tailscale service. They are not included in the generated sing-box file.
+
+`exit_node` must be a Tailscale IP address or a resolvable full hostname;
+short machine labels are not sufficient. The Tailscale container must keep its
+own network namespace. Do not run it with `network_mode:
+container:<amnezia-container>`.
+
 ## AmneziaWG 2 source
 
 An `amneziawg2_container` source requires the Docker container name, the
