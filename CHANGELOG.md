@@ -1,0 +1,9 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## 0.1.0 - Unreleased
+
+- Establish the public pre-alpha repository baseline.
+- Define a provider-neutral router configuration contract and local validator.
+- Document the first planned adapters: AmneziaWG 2 ingress and Tailscale egress.

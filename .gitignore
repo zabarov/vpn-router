@@ -1,0 +1,13 @@
+
+# SIMAI local working artifacts
+.DS_Store
+.env
+.env.*
+!.env.example
+source/
+output/
+node_modules/
+*.bak
+*.bak_*
+*.bak-*
+*.codex-bak-*

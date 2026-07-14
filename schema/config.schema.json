@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rim/vpn-router/schema/config.schema.json",
+  "title": "VPN Router configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sources", "capture", "egresses", "policies", "destination_sets", "traffic_handling", "resources"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/source" } },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "listen_port"],
+      "properties": {
+        "type": { "const": "tproxy" },
+        "listen_port": { "type": "integer", "minimum": 1024, "maximum": 65535 }
+      }
+    },
+    "egresses": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/egress" } },
+    "policies": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/policy" } },
+    "destination_sets": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[a-z][a-z0-9-]{1,62}$": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ip_cidrs"],
+        "properties": {
+          "ip_cidrs": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$" } }
+        }
+        }
+      }
+    },
+    "traffic_handling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["udp_quic", "ipv6", "dns_mode"],
+      "properties": {
+        "udp_quic": { "enum": ["reject", "bypass", "require_supported"] },
+        "ipv6": { "enum": ["reject", "bypass", "require_supported"] },
+        "dns_mode": { "enum": ["managed", "system"] }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nftables_table", "routing_mark", "routing_mask", "route_table", "rule_priority", "service_name"],
+      "properties": {
+        "nftables_table": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,31}$" },
+        "routing_mark": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "routing_mask": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "route_table": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "rule_priority": { "type": "integer", "minimum": 1, "maximum": 32765 },
+        "service_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" }
+      }
+    }
+  },
+  "$defs": {
+    "tag": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "type", "container_name", "interface", "client_subnet"],
+      "properties": {
+        "tag": { "$ref": "#/$defs/tag" },
+        "type": { "enum": ["amneziawg2_container"] },
+        "container_name": { "type": "string", "minLength": 1 },
+        "interface": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,15}$" },
+        "client_subnet": { "type": "string", "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$" }
+      }
+    },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "type"],
+      "properties": {
+        "tag": { "$ref": "#/$defs/tag" },
+        "type": { "enum": ["direct", "tailscale"] },
+        "state_directory": { "type": "string", "pattern": "^/" },
+        "auth_key_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,127}$" },
+        "exit_node": { "type": "string", "minLength": 1 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "source", "destination_sets", "egress", "failure_mode"],
+      "properties": {
+        "tag": { "$ref": "#/$defs/tag" },
+        "source": { "$ref": "#/$defs/tag" },
+        "destination_sets": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/tag" } },
+        "egress": { "$ref": "#/$defs/tag" },
+        "failure_mode": { "enum": ["block", "direct"] }
+      }
+    }
+  }
+}

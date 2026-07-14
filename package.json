@@ -1,0 +1,19 @@
+{
+  "name": "vpn-router",
+  "version": "0.1.0",
+  "description": "Provider-neutral, policy-based VPN traffic routing",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "validate": "node bin/vpn-router.mjs validate --config config.example.yaml",
+    "render:sing-box": "node bin/vpn-router.mjs render-sing-box --config config.example.yaml",
+    "render:nftables": "node bin/vpn-router.mjs render-nftables --config config.example.yaml"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  }
+}

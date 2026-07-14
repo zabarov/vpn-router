@@ -1,0 +1,56 @@
+name: vpn-router-tproxy-lab
+
+services:
+  source:
+    image: alpine:3.21
+    privileged: true
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache busybox-extras iproute2 nftables
+        ip netns add awg-client
+        ip link add awg0 type veth peer name client0
+        ip link set client0 netns awg-client
+        ip addr add 10.8.1.1/24 dev awg0
+        ip link set awg0 up
+        ip netns exec awg-client ip link set lo up
+        ip netns exec awg-client ip addr add 10.8.1.2/24 dev client0
+        ip netns exec awg-client ip link set client0 up
+        ip netns exec awg-client ip route add default via 10.8.1.1
+        sysctl -w net.ipv4.ip_forward=1 >/dev/null
+        ip rule add fwmark 8192/65535 lookup 200 priority 12000
+        ip route add local 0.0.0.0/0 dev lo table 200
+        nft -f /etc/vpn-router/nftables.conf
+        exec sleep infinity
+    volumes:
+      - ./nftables.conf:/etc/vpn-router/nftables.conf:ro
+    networks:
+      lab:
+        ipv4_address: 172.30.20.10
+
+  sidecar:
+    image: ghcr.io/sagernet/sing-box:v1.13.12
+    network_mode: service:source
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    command: ["-C", "/etc/sing-box", "run"]
+    volumes:
+      - ./sing-box.json:/etc/sing-box/config.json:ro
+    depends_on:
+      source:
+        condition: service_started
+
+  target:
+    image: alpine:3.21
+    command: ["/bin/sh", "-ec", "touch /tmp/target.log; while true; do nc -l -p 18080 >>/tmp/target.log; done"]
+    networks:
+      lab:
+        ipv4_address: 172.30.20.20
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24

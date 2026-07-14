@@ -1,0 +1,12 @@
+{
+  "endpoints": [
+    {
+      "type": "tailscale",
+      "tag": "regional-exit-endpoint",
+      "state_directory": "/var/lib/vpn-router/tailscale",
+      "hostname": "vpn-router-lab",
+      "ephemeral": true,
+      "exit_node": "regional-exit.example.ts.net"
+    }
+  ]
+}

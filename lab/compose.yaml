@@ -1,0 +1,43 @@
+services:
+  source:
+    image: alpine:3.21
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache busybox-extras iproute2
+        ip netns add awg-client
+        ip link add awg0 type veth peer name client0
+        ip link set client0 netns awg-client
+        ip addr add 10.8.1.1/24 dev awg0
+        ip link set awg0 up
+        ip netns exec awg-client ip link set lo up
+        ip netns exec awg-client ip addr add 10.8.1.2/24 dev client0
+        ip netns exec awg-client ip link set client0 up
+        nc -lk -p 18080 >/dev/null 2>&1 &
+        exec sleep infinity
+    privileged: true
+    healthcheck:
+      test: ["CMD-SHELL", "ip link show dev awg0 >/dev/null 2>&1"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+    networks:
+      lab:
+        ipv4_address: 172.30.10.10
+
+  sidecar:
+    image: alpine:3.21
+    command: ["/bin/sh", "-ec", "apk add --no-cache tcpdump; exec sleep infinity"]
+    network_mode: service:source
+    cap_add:
+      - NET_RAW
+    depends_on:
+      source:
+        condition: service_healthy
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24

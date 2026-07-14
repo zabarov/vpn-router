@@ -1,0 +1,21 @@
+{
+  "inbounds": [
+    {
+      "type": "tproxy",
+      "tag": "capture-in",
+      "listen": "0.0.0.0",
+      "listen_port": 12345,
+      "network": "tcp"
+    }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "inbound": ["capture-in"], "ip_cidr": ["172.30.20.20/32"], "outbound": "direct" }
+    ],
+    "final": "block"
+  }
+}

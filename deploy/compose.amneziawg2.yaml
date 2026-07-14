@@ -1,0 +1,13 @@
+services:
+  vpn-router:
+    image: ghcr.io/sagernet/sing-box:v1.13.12
+    container_name: ${VPN_ROUTER_SERVICE_NAME:-vpn-router}
+    network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ${VPN_ROUTER_SING_BOX_CONFIG:?Set VPN_ROUTER_SING_BOX_CONFIG}:/etc/sing-box/config.json:ro
+      - ${VPN_ROUTER_STATE_DIRECTORY:-/var/lib/vpn-router/tailscale}:/var/lib/vpn-router/tailscale
+    command: ["-C", "/etc/sing-box", "run"]
