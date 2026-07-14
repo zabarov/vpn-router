@@ -3,6 +3,17 @@
 The current pre-alpha package validates configuration locally. It does not yet
 include a production installer.
 
+Before a gated rollout, make the deployment package with one command:
+
+```sh
+./scripts/prepare-amneziawg2-artifacts.sh \
+  --config ./router.yaml \
+  --output-dir ./build/vpn-router
+```
+
+It renders the sing-box, nftables, and dnsmasq files and validates each against
+the pinned local container checks. It does not contact or modify a server.
+
 For a managed domain policy, the deployment package builds a small dnsmasq
 sidecar from `deploy/dnsmasq/Dockerfile`. The image must be built and its
 configuration checked before the live gate. Do not substitute an arbitrary

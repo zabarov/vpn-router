@@ -10,3 +10,5 @@ All notable changes to this project will be documented in this file.
 - Add managed domain-suffix routing through dnsmasq nftables sets, including
   `.ru`, `.xn--p1ai` (the ASCII form of `.рф`), and `.su` in the reference
   policy.
+- Add a deterministic local artifact-preparation command for the AmneziaWG 2
+  deployment contract.
