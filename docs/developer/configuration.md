@@ -12,7 +12,7 @@ changes.
 - `capture`: the transparent capture driver and its listener port.
 - `egresses`: named direct or Tailscale egress adapters.
 - `policies`: named route decisions.
-- `destination_sets`: named IPv4/IPv6 CIDR sets referenced by non-default policies.
+- `destination_sets`: named IPv4/IPv6 CIDR and/or domain-suffix sets referenced by non-default policies.
 - `traffic_handling`: explicit behavior for UDP/QUIC and IPv6.
 - `resources`: deployment-owned routing and state resources.
 
@@ -41,6 +41,15 @@ The initial runtime uses Linux TPROXY. `capture.listen_port` is the port that
 the owned nftables rules deliver to the router. It must not collide with a
 port already used inside the Amnezia container namespace.
 
-`destination_sets` currently use CIDRs only. Domain-driven routing needs a
-separate DNS evidence and leak-test milestone, so it is not silently enabled
-by the first deployment.
+Domain suffixes use lower-case ASCII, with IDN domains written as punycode. For
+example, the Russian suffix `.рф` is `.xn--p1ai`. A strict domain set is
+realized by dnsmasq: it observes client DNS, adds resolved IPv4 addresses to
+the router's owned nftables set, and only then allows the capture rule to send
+that traffic to the selected egress. This keeps non-selected TCP traffic out
+of the sidecar.
+
+With `dns_mode: managed`, the generated nftables policy redirects client DNS
+on the source interface to dnsmasq port 5353. Encrypted DNS and direct-IP
+connections do not carry a domain suffix and are therefore not classified by
+this first adapter. QUIC is rejected in strict profiles so that a browser can
+retry via TCP/TLS, where DNS-derived classification is enforceable.

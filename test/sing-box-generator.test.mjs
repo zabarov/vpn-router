@@ -19,7 +19,16 @@ test('generates a no-secret TPROXY and Tailscale endpoint contract', () => {
   assert.equal(generated.inbounds[0].listen_port, 12345);
   assert.equal(generated.endpoints[0].type, 'tailscale');
   assert.equal(JSON.stringify(generated).includes('VPN_ROUTER_TAILSCALE_AUTH_KEY'), false);
-  assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'direct' });
+  assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'block' });
+});
+
+test('sniffs a strict domain policy before evaluating its suffix', () => {
+  const domainConfig = structuredClone(config);
+  domainConfig.destination_sets['regional-services'] = { domain_suffixes: ['.ru', '.xn--p1ai', '.su'] };
+  const generated = generateSingBoxConfig(domainConfig);
+  assert.deepEqual(generated.route.rules[0], { inbound: ['capture-in'], action: 'sniff', timeout: '1s' });
+  assert.ok(generated.route.rules.some((rule) => JSON.stringify(rule) === JSON.stringify({ inbound: ['capture-in'], domain_suffix: ['.ru', '.xn--p1ai', '.su'], outbound: 'regional-exit' })));
+  assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'block' });
 });
 
 test('includes an auth key only when explicitly supplied by the deployment boundary', () => {

@@ -10,6 +10,7 @@ From one validated YAML configuration, generate:
 ```sh
 node bin/vpn-router.mjs render-sing-box --config ./router.yaml > ./sing-box.json
 node bin/vpn-router.mjs render-nftables --config ./router.yaml > ./vpn-router.nft
+node bin/vpn-router.mjs render-dnsmasq --config ./router.yaml > ./dnsmasq.conf
 ```
 
 The normal generated sing-box file has no credential value. For a first,
@@ -70,5 +71,7 @@ NAT. It also means that a replacement of the source container requires a
 sidecar restart and renewed health check.
 
 The template must be invoked with an explicit source container name and a
-local generated configuration path; it contains neither a server hostname nor
-a credential.
+local generated configuration path. For a managed domain policy it also needs
+`VPN_ROUTER_DNSMASQ_CONFIG`; the DNS sidecar shares the VPN source namespace
+and has `NET_ADMIN` solely to update this project's named nftables sets. It
+contains neither a server hostname nor a credential.

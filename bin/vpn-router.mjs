@@ -6,14 +6,15 @@ import { parseDocument } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
 import { generateSingBoxConfig } from '../src/sing-box-generator.mjs';
 import { generateNftablesConfig } from '../src/nftables-generator.mjs';
+import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-sing-box|render-nftables> --config <path> [--include-auth-key-from-env]';
+  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq> --config <path> [--include-auth-key-from-env]';
 }
 
 async function main(argv) {
   const [command, option, configPath, authOption] = argv;
-  if (!['validate', 'render-sing-box', 'render-nftables'].includes(command) || option !== '--config' || !configPath || (authOption && authOption !== '--include-auth-key-from-env') || (authOption && command !== 'render-sing-box')) {
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq'].includes(command) || option !== '--config' || !configPath || (authOption && authOption !== '--include-auth-key-from-env') || (authOption && command !== 'render-sing-box')) {
     throw new Error(usage());
   }
 
@@ -33,6 +34,10 @@ async function main(argv) {
   }
   if (command === 'render-nftables') {
     process.stdout.write(generateNftablesConfig(document.toJS()));
+    return;
+  }
+  if (command === 'render-dnsmasq') {
+    process.stdout.write(generateDnsmasqConfig(document.toJS()));
     return;
   }
   const authKeys = {};

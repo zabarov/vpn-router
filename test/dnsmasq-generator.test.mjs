@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateNftablesConfig } from '../src/nftables-generator.mjs';
+import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
 
 const config = {
   schema_version: '1.0',
@@ -13,12 +13,8 @@ const config = {
   resources: { nftables_table: 'vpn_router', routing_mark: 8192, routing_mask: 65535, route_table: 200, rule_priority: 12000, service_name: 'vpn-router' }
 };
 
-test('generates an owned strict-only TPROXY table', () => {
-  const generated = generateNftablesConfig(config);
-  assert.match(generated, /table inet vpn_router/);
-  assert.match(generated, /set set_regional_services \{ type ipv4_addr; flags interval; \}/);
-  assert.match(generated, /iifname "awg0" udp dport 53 redirect to :5353/);
-  assert.match(generated, /iifname "awg0" ip daddr @set_regional_services meta l4proto tcp tproxy ip to :12345 meta mark set 8192 accept/);
-  assert.match(generated, /iifname "awg0" udp dport 443 reject/);
-  assert.doesNotMatch(generated, /flush ruleset/);
+test('generates dnsmasq nftset rules for strict domain suffixes', () => {
+  const generated = generateDnsmasqConfig(config);
+  assert.match(generated, /^port=5353$/m);
+  assert.match(generated, /^nftset=\/ru\/xn--p1ai\/su\/4#inet#vpn_router#set_regional_services$/m);
 });

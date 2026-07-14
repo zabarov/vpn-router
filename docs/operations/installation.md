@@ -3,6 +3,11 @@
 The current pre-alpha package validates configuration locally. It does not yet
 include a production installer.
 
+For a managed domain policy, the deployment package builds a small dnsmasq
+sidecar from `deploy/dnsmasq/Dockerfile`. The image must be built and its
+configuration checked before the live gate. Do not substitute an arbitrary
+dnsmasq image: support for the `nftset` directive is required.
+
 Before a future live installation, the operator must:
 
 1. Validate the configuration locally.

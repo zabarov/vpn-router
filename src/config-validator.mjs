@@ -28,6 +28,10 @@ function validCidr(value) {
   return Number.isInteger(Number(prefix)) && Number(prefix) >= 0 && Number(prefix) <= maxPrefix;
 }
 
+function validDomainSuffix(value) {
+  return typeof value === 'string' && /^\.[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+}
+
 export function validateConfig(config) {
   const errors = [];
   if (!isObject(config)) return { valid: false, errors: ['configuration must be a YAML object'] };
@@ -44,6 +48,20 @@ export function validateConfig(config) {
 
   if (!isObject(config.destination_sets)) {
     errors.push('destination_sets must be an object');
+  } else {
+    for (const [name, destinationSet] of Object.entries(config.destination_sets)) {
+      if (!isObject(destinationSet)) {
+        errors.push(`destination set ${name} must be an object`);
+        continue;
+      }
+      const cidrs = destinationSet.ip_cidrs ?? [];
+      const suffixes = destinationSet.domain_suffixes ?? [];
+      if ((!Array.isArray(cidrs) || cidrs.length === 0) && (!Array.isArray(suffixes) || suffixes.length === 0)) {
+        errors.push(`destination set ${name} requires ip_cidrs or domain_suffixes`);
+      }
+      if (!Array.isArray(cidrs) || cidrs.some((cidr) => !validCidr(cidr))) errors.push(`destination set ${name} has an invalid ip_cidrs entry`);
+      if (!Array.isArray(suffixes) || suffixes.some((suffix) => !validDomainSuffix(suffix))) errors.push(`destination set ${name} has an invalid domain_suffixes entry`);
+    }
   }
 
   const sourceTags = uniqueTags(config.sources, 'source', errors);

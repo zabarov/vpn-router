@@ -15,9 +15,23 @@ export function generateNftablesConfig(config) {
 
   const lines = [`table inet ${config.resources.nftables_table} {`];
   for (const name of sets) {
-    const cidrs = config.destination_sets[name].ip_cidrs;
+    const cidrs = config.destination_sets[name].ip_cidrs ?? [];
+    const suffixes = config.destination_sets[name].domain_suffixes ?? [];
     const ipv4 = cidrs.filter((cidr) => !cidr.includes(':'));
     if (ipv4.length > 0) lines.push(`  set ${setName(name)} { type ipv4_addr; flags interval; elements = { ${ipv4.join(', ')} } }`);
+    else if (suffixes.length > 0) lines.push(`  set ${setName(name)} { type ipv4_addr; flags interval; }`);
+  }
+
+  const hasStrictDomains = sets.some((name) => (config.destination_sets[name].domain_suffixes ?? []).length > 0);
+  if (hasStrictDomains && config.traffic_handling.dns_mode === 'managed') {
+    lines.push('  chain dns_redirect {');
+    lines.push('    type nat hook prerouting priority dstnat; policy accept;');
+    for (const policy of strictPolicies) {
+      const source = config.sources.find((candidate) => candidate.tag === policy.source);
+      lines.push(`    iifname "${source.interface}" udp dport 53 redirect to :5353`);
+      lines.push(`    iifname "${source.interface}" tcp dport 53 redirect to :5353`);
+    }
+    lines.push('  }');
   }
 
   lines.push('  chain prerouting {');
@@ -25,10 +39,12 @@ export function generateNftablesConfig(config) {
   for (const policy of strictPolicies) {
     const source = config.sources.find((candidate) => candidate.tag === policy.source);
     for (const destinationSet of policy.destination_sets.filter((name) => name !== 'default')) {
-      const ipv4 = config.destination_sets[destinationSet].ip_cidrs.filter((cidr) => !cidr.includes(':'));
-      if (ipv4.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
+      const destination = config.destination_sets[destinationSet];
+      const ipv4 = (destination.ip_cidrs ?? []).filter((cidr) => !cidr.includes(':'));
+      const suffixes = destination.domain_suffixes ?? [];
+      if (ipv4.length > 0 || suffixes.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
     }
-    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" meta l4proto udp reject`);
+    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" udp dport 443 reject`);
     if (config.traffic_handling.ipv6 === 'reject') lines.push(`    iifname "${source.interface}" meta nfproto ipv6 reject`);
   }
   lines.push('  }');
