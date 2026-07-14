@@ -38,12 +38,15 @@ export function generateNftablesConfig(config) {
   lines.push('    type filter hook prerouting priority mangle; policy accept;');
   for (const policy of strictPolicies) {
     const source = config.sources.find((candidate) => candidate.tag === policy.source);
+    const hasDomainSuffixes = policy.destination_sets
+      .filter((name) => name !== 'default')
+      .some((name) => (config.destination_sets[name].domain_suffixes ?? []).length > 0);
     for (const destinationSet of policy.destination_sets.filter((name) => name !== 'default')) {
       const destination = config.destination_sets[destinationSet];
       const ipv4 = (destination.ip_cidrs ?? []).filter((cidr) => !cidr.includes(':'));
-      const suffixes = destination.domain_suffixes ?? [];
-      if (ipv4.length > 0 || suffixes.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
+      if (ipv4.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
     }
+    if (hasDomainSuffixes) lines.push(`    iifname "${source.interface}" meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
     if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" udp dport 443 reject`);
     if (config.traffic_handling.ipv6 === 'reject') lines.push(`    iifname "${source.interface}" ip6 daddr ::/0 reject`);
   }

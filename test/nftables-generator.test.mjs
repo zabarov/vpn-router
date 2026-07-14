@@ -13,12 +13,12 @@ const config = {
   resources: { nftables_table: 'vpn_router', routing_mark: 8192, routing_mask: 65535, route_table: 200, rule_priority: 12000, service_name: 'vpn-router' }
 };
 
-test('generates an owned strict-only TPROXY table', () => {
+test('captures strict domain policies by TLS or HTTP name, not only DNS', () => {
   const generated = generateNftablesConfig(config);
   assert.match(generated, /table inet vpn_router/);
   assert.match(generated, /set set_regional_services \{ type ipv4_addr; flags interval; \}/);
   assert.match(generated, /iifname "awg0" udp dport 53 redirect to :5353/);
-  assert.match(generated, /iifname "awg0" ip daddr @set_regional_services meta l4proto tcp tproxy ip to :12345 meta mark set 8192 accept/);
+  assert.match(generated, /iifname "awg0" meta l4proto tcp tproxy ip to :12345 meta mark set 8192 accept/);
   assert.match(generated, /iifname "awg0" udp dport 443 reject/);
   assert.match(generated, /iifname "awg0" ip6 daddr ::\/0 reject/);
   assert.doesNotMatch(generated, /flush ruleset/);
