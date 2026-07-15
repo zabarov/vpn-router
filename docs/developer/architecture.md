@@ -22,9 +22,8 @@ client -> awg0 (Amnezia namespace) -> router sidecar -> policy -> egress
 ```
 
 The Tailscale adapter is an egress endpoint. A strict policy using that adapter
-must fail at that outbound when the adapter is unhealthy; it must never become
-direct traffic by accident. Domain policies are classified by TLS SNI or HTTP
-host name inside the router, rather than relying only on a client's DNS path.
+must block when the adapter is unhealthy. It must never become direct traffic
+by accident.
 
 ## Ownership model
 

@@ -68,15 +68,11 @@ the owned nftables rules deliver to the router. It must not collide with a
 port already used inside the Amnezia container namespace.
 
 Domain suffixes use lower-case ASCII, with IDN domains written as punycode. For
-example, the Russian suffix `.рф` is `.xn--p1ai`. A strict domain policy
-captures TCP from the declared VPN interface and sing-box identifies TLS SNI
-or an HTTP host name before choosing its egress. This works when the client
-uses DNS-over-HTTPS, DNS-over-TLS, or a warm DNS cache. Unmatched TCP traffic
-uses the explicit direct egress.
-
-With `dns_mode: managed`, dnsmasq also records ordinary DNS answers in an
-owned nftables set. That data is diagnostic and can support future
-IP-specific policies; it is not the enforcement source for domain routing.
+example, the Russian suffix `.рф` is `.xn--p1ai`. A strict domain set is
+realized by dnsmasq: it observes client DNS, adds resolved IPv4 addresses to
+the router's owned nftables set, and only then allows the capture rule to send
+that traffic to the selected egress. This keeps non-selected TCP traffic out
+of the sidecar.
 
 With `dns_mode: managed`, the generated nftables policy redirects client DNS
 on the source interface to dnsmasq port 5353. Encrypted DNS and direct-IP

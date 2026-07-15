@@ -19,8 +19,7 @@ test('generates a TPROXY and isolated Tailscale SOCKS egress contract', () => {
   assert.equal(generated.inbounds[0].listen_port, 12345);
   assert.deepEqual(generated.outbounds.find((outbound) => outbound.tag === 'regional-exit'), { type: 'socks', tag: 'regional-exit', server: 'vpn-router-egress', server_port: 1055 });
   assert.doesNotMatch(JSON.stringify(generated), /VPN_ROUTER_TAILSCALE_AUTH_KEY|exit_node/);
-  assert.equal(generated.route.final, 'direct');
-  assert.doesNotMatch(JSON.stringify(generated.route.rules), /"inbound":\["capture-in"\],"outbound":"block"/);
+  assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'block' });
 });
 
 test('sniffs a strict domain policy before evaluating its suffix', () => {
@@ -29,5 +28,5 @@ test('sniffs a strict domain policy before evaluating its suffix', () => {
   const generated = generateSingBoxConfig(domainConfig);
   assert.deepEqual(generated.route.rules[0], { inbound: ['capture-in'], action: 'sniff', timeout: '1s' });
   assert.ok(generated.route.rules.some((rule) => JSON.stringify(rule) === JSON.stringify({ inbound: ['capture-in'], domain_suffix: ['.ru', '.xn--p1ai', '.su'], outbound: 'regional-exit' })));
-  assert.equal(generated.route.final, 'direct');
+  assert.deepEqual(generated.route.rules.at(-1), { inbound: ['capture-in'], outbound: 'block' });
 });
