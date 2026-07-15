@@ -5,6 +5,8 @@ local validator.
 
 ## Required evidence
 
+- A disposable namespace-lab proof of the exact TPROXY, policy-route, and
+  return-path behavior before a first client rollout.
 - A read-only inventory of the target host and VPN source topology.
 - Verified access recovery path.
 - Backup locations and restoration commands for every affected resource.
@@ -22,3 +24,5 @@ local validator.
 - The Tailscale egress is not healthy or no exit node is selected.
 - A strict policy can fall back to direct traffic.
 - Backup or rollback evidence is missing.
+- A VPN client loses basic connectivity; immediately remove the capture
+  sidecar, its owned nftables table, and its policy route.

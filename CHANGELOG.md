@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Marked the AmneziaWG 2 TPROXY path as unproven after a client-connectivity
+  incident was rolled back. The isolated Tailscale SOCKS egress remains a
+  separate, validated component.
+
 All notable changes to this project will be documented in this file.
 
 ## 0.1.0 - Unreleased

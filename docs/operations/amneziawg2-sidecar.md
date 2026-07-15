@@ -2,7 +2,7 @@
 
 ## Why the router joins the container namespace
 
-The verified AmneziaWG 2 layout keeps `awg0` and VPN client addresses inside
+The reference AmneziaWG 2 layout keeps `awg0` and VPN client addresses inside
 the Amnezia Docker container. NAT then changes those source addresses before
 the host can inspect them. A host-only router therefore cannot reliably apply
 client-subnet policy.
@@ -45,3 +45,11 @@ Do not deploy merely because this preflight passes. The operator still needs a
 Tailscale enrollment method, selected exit node, resource ownership map,
 backup, rollback, change window, and end-to-end smoke plan. See
 [the live validation gate](live-validation.md).
+
+## Current validation status
+
+The namespace layout and isolated Tailscale SOCKS egress have been observed on
+a real AmneziaWG 2 host. Client acceptance of the TPROXY capture path is not
+yet proven: a live experiment interrupted VPN-client connectivity and was
+fully rolled back. Reproduce the packet path in a disposable namespace lab and
+prove client connectivity before treating this adapter as deployable.
