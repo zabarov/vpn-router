@@ -141,12 +141,15 @@ test('rollback tolerates bounded asynchronous resource and route cleanup', async
   assert.match(source, /for _attempt in \{1[.]\.10\}/);
 });
 
-test('rollback compares stable network semantics instead of expiring lease timers', async () => {
+test('rollback compares stable network semantics instead of volatile lease and kernel indexes', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const normalizerStart = source.indexOf('normalize_network_json()');
   const normalizerEnd = source.indexOf('manifest_matches_current_config()', normalizerStart);
   const normalizer = source.slice(normalizerStart, normalizerEnd);
   assert.match(normalizer, /"expires"/);
+  assert.match(normalizer, /"ifindex"/);
+  assert.match(normalizer, /"link_index"/);
+  assert.match(normalizer, /"link_netnsid"/);
   assert.match(normalizer, /"preferred_life_time"/);
   assert.match(normalizer, /"valid_life_time"/);
   assert.match(normalizer, /Object[.]keys\(value\)[.]sort\(\)/);

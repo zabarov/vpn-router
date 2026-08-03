@@ -228,7 +228,14 @@ normalize_network_json() {
   # shellcheck disable=SC2016
   "$node_bin" -e '
     const fs = require("node:fs");
-    const volatile = new Set(["expires", "preferred_life_time", "valid_life_time"]);
+    const volatile = new Set([
+      "expires",
+      "ifindex",
+      "link_index",
+      "link_netnsid",
+      "preferred_life_time",
+      "valid_life_time"
+    ]);
     const normalize = (value) => {
       if (Array.isArray(value)) {
         return value.map(normalize).sort((left, right) =>
