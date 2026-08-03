@@ -1,0 +1,20 @@
+[Unit]
+Description=VPN Router policy routing
+Documentation=https://github.com/rim/vpn-router
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=VPN_ROUTER_CONFIG=@CONFIG_PATH@
+Environment=VPN_ROUTER_NODE=@NODE_PATH@
+ExecStart=@CURRENT_PATH@/scripts/vpn-router-service.sh start
+ExecStop=@CURRENT_PATH@/scripts/vpn-router-service.sh stop
+TimeoutStartSec=900
+TimeoutStopSec=300
+
+[Install]
+WantedBy=multi-user.target

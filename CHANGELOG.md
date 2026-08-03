@@ -2,6 +2,38 @@
 
 All notable changes are documented here.
 
+## 0.4.0-pre-alpha - Unreleased
+
+- Add a clean-host Debian/Ubuntu installer with an SHA-256-verified private
+  Node.js LTS runtime, immutable content-addressed releases, and an atomic
+  `current` switch independent of the Git checkout.
+- Add a stable `vpn-router` operator command for configuration, validation,
+  lifecycle, routing-switch, reconciliation, and systemd operations.
+- Add an interactive and automation-friendly configuration wizard that writes
+  mode-`0600` validated YAML without storing credentials.
+- Add opt-in systemd boot reconciliation with bounded source readiness, a
+  rollback deadman, health verification, and routing cleanup on service stop.
+- Add a managed host-namespace lifecycle for WireGuard, OpenVPN, IPsec, and
+  other pre-existing Linux VPN interfaces using external SOCKS5 or a separate
+  tunnel-interface egress.
+- Recover safely from source-container recreation by archiving the old
+  root-only manifest and refusing ambiguous resources in the new namespace.
+- Add atomic upgrade, previous-version rollback, safe uninstall with retained
+  configuration/state, and separately explicit purge behavior.
+- Add a disposable clean Ubuntu packaging test covering install, configure,
+  validate, changed-tree upgrade, version rollback, uninstall, and retained
+  configuration.
+- Publish complete English install, boot, upgrade, removal, and troubleshooting
+  procedures while keeping the remaining live reboot and generic-source
+  integration evidence limits explicit.
+- Remove the unnecessary Docker Hub Alpine pull from live preflight, validate
+  nftables with the target namespace's own `nft`, and use Canonical's official
+  Azure registry Ubuntu image for the DNS build and clean-host lab.
+- Prove the installed host-interface lifecycle on a non-production Ubuntu host:
+  strict/direct routing, SOCKS and capture outages, recovery, disable,
+  boot-helper start/stop, exact cleanup, and distribution-compatible Compose
+  dependency handling.
+
 ## 0.3.0-pre-alpha - Unreleased
 
 - Replace the single-client enforcement model with an explicit client scope:

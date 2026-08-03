@@ -38,3 +38,9 @@ jobs:
 
       - name: Run disposable container labs
         run: npm run check:containers
+
+      - name: Verify clean-host packaging lifecycle
+        run: npm run check:clean-host
+
+      - name: Verify generic Linux VPN interface lifecycle
+        run: npm run check:linux-host

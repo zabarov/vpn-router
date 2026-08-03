@@ -1,6 +1,6 @@
 {
   "name": "vpn-router",
-  "version": "0.3.0-pre-alpha",
+  "version": "0.4.0-pre-alpha",
   "description": "Provider-neutral, policy-based VPN traffic routing",
   "license": "MIT",
   "type": "module",
@@ -16,6 +16,8 @@
     "check:shell": "./scripts/check-shell.sh",
     "check": "npm test && npm run validate && npm run validate:schema && npm run check:shell && npm run check:english && npm run check:secrets",
     "check:containers": "./lab/verify.sh && ./lab/redirect/verify.sh",
+    "check:clean-host": "./lab/install/verify.sh",
+    "check:linux-host": "sudo env \"PATH=$PATH\" \"VPN_ROUTER_NODE=$(command -v node)\" ./lab/linux-interface/verify.sh",
     "render:sing-box": "node bin/vpn-router.mjs render-sing-box --config config.example.yaml",
     "render:nftables": "node bin/vpn-router.mjs render-nftables --config config.example.yaml"
   },

@@ -7,16 +7,16 @@ status still requires the following gates.
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
 | Configuration | Client list/subnet selectors, migration, negative validation | Passed in unit, container and live staged rollout |
-| Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 data path and all generator fixtures pass; Linux-interface integration pending |
+| Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 passes both container-source and real host-interface paths; Linux-interface strict egress remains fixture-only |
 | Routing switch | Idempotent enable/disable with preserved VPN and egress state | Passed between live list and subnet stages |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
 | Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tailscale and capture outages passed in container and live stages; broader matrix remains |
-| Restart lifecycle | Host reboot, Docker restart and source recreation | Planned |
-| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Planned |
+| Restart lifecycle | Host reboot, Docker restart and source recreation | Boot helper start/stop passes on real Linux; full host reboot and source recreation remain pending |
+| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Atomic changed-tree upgrade and previous-version rollback pass the clean-host packaging lab; active data-plane upgrade evidence pending |
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
-| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Planned |
+| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Passed for both bundled source contracts; real host-interface data-path evidence remains pending |
 | Live rollout | Canary, list and subnet stages with backup and deadman rollback | Passed on the reference AmneziaWG2 plus Tailscale deployment |
 
 ## Release levels
@@ -24,7 +24,8 @@ status still requires the following gates.
 - `pre-alpha`: architecture and controlled reference evidence; interfaces may
   change.
 - `alpha`: multi-client and lifecycle behavior pass disposable integration
-  tests and a separately gated live reference rollout.
+  tests, a clean-host packaging test, and a separately gated live reference
+  rollout.
 - `beta`: clean-host install, reboot/recreation, upgrade/downgrade, monitoring,
   and at least two source/egress combinations are proved.
 - `stable`: supported compatibility matrix, documented maintenance policy,

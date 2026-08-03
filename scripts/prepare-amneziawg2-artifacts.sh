@@ -49,8 +49,8 @@ node "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path" >
 chmod 600 "$output_dir/sing-box.json" "$output_dir/vpn-router.nft" "$output_dir/dnsmasq.conf" "$output_dir/runtime.env"
 
 docker run --rm -v "$output_dir/sing-box.json:/config.json:ro" ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d check -c /config.json
-docker run --rm --cap-add NET_ADMIN -v "$output_dir/vpn-router.nft:/rules.nft:ro" alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d sh -ec 'apk add --no-cache nftables >/dev/null && nft -c -f /rules.nft'
 docker build -t vpn-router-dns:local-check "$repo_dir/deploy/dnsmasq" >/dev/null
+docker run --rm --entrypoint nft --cap-add NET_ADMIN -v "$output_dir/vpn-router.nft:/rules.nft:ro" vpn-router-dns:local-check -c -f /rules.nft
 docker run --rm -v "$output_dir/dnsmasq.conf:/etc/dnsmasq.conf:ro" vpn-router-dns:local-check --test
 
 printf '%s\n' "PASS: validated deployment artifacts are in $output_dir"

@@ -10,16 +10,18 @@ VPN client -> VPN interface -> managed DNS/IP set -> TCP REDIRECT -> sing-box
                      non-selected traffic --------------------------> direct
 ```
 
-The policy model is provider-neutral. `linux_interface` represents a VPN
-interface in the current Linux namespace, and `amneziawg2_container` is the
-first managed deployment adapter. The routing core does not contain country or
-provider names.
+The policy model is provider-neutral. `linux_interface` represents WireGuard,
+OpenVPN, IPsec, or another VPN interface in the host Linux namespace, while
+`amneziawg2_container` represents a container-owned namespace. The routing core
+does not contain country or provider names.
 
-> Status: `0.3.0-pre-alpha`. The generator, secret-safe AmneziaWG2 profile
+> Status: `0.4.0-pre-alpha`. The generator, secret-safe AmneziaWG2 profile
 > extraction, source-scoped fail-closed rules, disposable integration lab, and
-> guarded AmneziaWG2/Tailscale lifecycle are implemented. Every live deployment
-> still starts with a `/32` canary, a backup, a rollback deadman, and
-> operator-reviewed acceptance evidence. This release is not production-ready.
+> guarded AmneziaWG2/Tailscale lifecycle are implemented. A clean-host
+> installer, configuration wizard, systemd reconciliation, version rollback,
+> and safe uninstall are also available. Every live deployment still starts
+> with a `/32` canary, a backup, a rollback deadman, and operator-reviewed
+> acceptance evidence. This release is not production-ready.
 
 ## Current guarantee
 
@@ -41,7 +43,28 @@ Chrome Secure DNS, other DoH/DoT clients, ECH, direct-IP connections, and IPv6
 are outside the guaranteed mode. Use system DNS and disable those alternate
 paths for a strict canary.
 
-## Quick start
+## Install on a server
+
+On a Debian or Ubuntu host with an existing AmneziaWG2 Docker container:
+
+```sh
+git clone https://github.com/rim/vpn-router.git
+cd vpn-router
+sudo ./install.sh install --install-dependencies
+sudo vpn-router configure --output /etc/vpn-router/router.yaml
+sudo vpn-router validate
+sudo vpn-router preflight
+```
+
+The installer provides a pinned private Node.js runtime, the `vpn-router`
+command, atomic upgrades, a previous-version rollback, safe uninstall, and an
+opt-in systemd service. It does not install or replace the source VPN.
+
+Read the complete [installation and lifecycle guide](docs/operations/installation.md)
+before `enable`. The first live client scope must be one test `/32`, and enable
+always requires a server-side rollback timer.
+
+## Contributor quick start
 
 Requires Node.js 22 or newer and Docker for container checks.
 
@@ -88,9 +111,10 @@ removed or revoked after testing.
 
 ## Managed lifecycle
 
-The guarded managed lifecycle currently applies to an
-`amneziawg2_container` source. It manages the Tailscale sidecar when selected,
-or health-checks an operator-managed SOCKS5 service or tunnel interface:
+The guarded lifecycle supports an `amneziawg2_container` source with Tailscale,
+external SOCKS5, or tunnel-interface egress. A host `linux_interface` source
+supports external SOCKS5 or a separate tunnel interface; managed Tailscale
+remains container-source-only:
 
 ```sh
 sudo ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
@@ -98,6 +122,14 @@ sudo ./scripts/vpn-router-lifecycle.sh enable --config ./router.yaml --rollback-
 sudo ./scripts/vpn-router-lifecycle.sh status --config ./router.yaml
 sudo ./scripts/vpn-router-lifecycle.sh verify --config ./router.yaml
 sudo ./scripts/vpn-router-lifecycle.sh disable --config ./router.yaml
+```
+
+Installed servers use the shorter stable command:
+
+```sh
+sudo vpn-router enable --rollback-after 600
+sudo vpn-router status
+sudo vpn-router disable
 ```
 
 `enable` always arms a server-side rollback timer. Cancel it only after the
@@ -122,8 +154,10 @@ recovery.
 - [External SOCKS5 example](examples/config.socks5.yaml)
 - [Linux tunnel egress example](examples/config.linux-interface.yaml)
 - [Installation and lifecycle](docs/operations/installation.md)
+- [Troubleshooting](docs/operations/troubleshooting.md)
 - [Live validation gate](docs/operations/live-validation.md)
 - [Sanitized 0.3 multi-client validation report](docs/operations/validation-report-0.3.md)
+- [Sanitized 0.4 clean-host validation report](docs/operations/validation-report-0.4.md)
 - [Sanitized 0.2 canary validation report](docs/operations/validation-report.md)
 - [AmneziaWG2 deployment model](docs/operations/amneziawg2-sidecar.md)
 - [Ownership and rollback contract](docs/operations/deployment-contract.md)

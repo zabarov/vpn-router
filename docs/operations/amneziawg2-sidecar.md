@@ -43,9 +43,12 @@ The isolated client runner uses the pinned
 ## Recreation behavior
 
 Docker binds `network_mode: container:<name>` to one container namespace. If
-the source container is recreated, lifecycle verification fails on container
-ID mismatch. The old namespace and its rules disappear; do not apply anything
-to the new namespace until preflight, baseline, and canary are repeated.
+the source container is recreated, ordinary verification fails on container ID
+mismatch. An explicit `reconcile` or the opt-in systemd service archives the
+old manifest and reapplies only when the replacement namespace contains no
+matching project table or proxy-network attachment. Repeat the external canary
+matrix after recreation; internal boot checks are not equivalent to client
+acceptance.
 
 ## Validation status
 

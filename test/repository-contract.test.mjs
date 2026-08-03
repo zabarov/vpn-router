@@ -22,15 +22,16 @@ test('release version and ignored private workspace stay consistent', async () =
 });
 
 test('external runtime images are immutable', async () => {
-  const [deploymentText, namespaceLabText, redirectLabText, lifecycle, isolatedRunner, dnsDockerfile] = await Promise.all([
+  const [deploymentText, linuxDeploymentText, namespaceLabText, redirectLabText, lifecycle, isolatedRunner, dnsDockerfile] = await Promise.all([
     text('../deploy/compose.amneziawg2.yaml'),
+    text('../deploy/compose.linux-interface.yaml'),
     text('../lab/compose.yaml'),
     text('../lab/redirect/compose.yaml'),
     text('../scripts/vpn-router-lifecycle.sh'),
     text('../scripts/run-isolated-amneziawg2-client.sh'),
     text('../deploy/dnsmasq/Dockerfile')
   ]);
-  for (const composeText of [deploymentText, namespaceLabText, redirectLabText]) {
+  for (const composeText of [deploymentText, linuxDeploymentText, namespaceLabText, redirectLabText]) {
     const compose = parse(composeText);
     for (const [name, service] of Object.entries(compose.services)) {
       if (service.build) continue;

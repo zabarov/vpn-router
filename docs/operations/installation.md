@@ -1,147 +1,237 @@
 # Installation and lifecycle
 
-## Prerequisites
+This guide starts with a clean Debian or Ubuntu host and ends with a reversible
+VPN Router service. Keep the first rollout limited to one test client `/32`.
 
-The managed AmneziaWG2 adapter requires:
+## Supported installation target
 
-- a Linux host with systemd;
-- Docker Engine and Compose plugin with network gateway-priority support;
-- Node.js 22 or newer;
-- an existing, healthy AmneziaWG2 container and `awg0` interface;
-- `/dev/net/tun` for an isolated client test;
-- one supported strict egress: a Tailscale exit node, reachable SOCKS5 service,
-  or pre-existing tunnel interface;
-- a unique test-client IPv4 address expressed as an `address_list` `/32`.
+The bundled installer supports x86-64 and ARM64 Debian/Ubuntu hosts with
+systemd. It installs VPN Router under `/opt/vpn-router`, configuration under
+`/etc/vpn-router`, a stable `/usr/local/sbin/vpn-router` command, and an
+opt-in systemd service. It downloads the pinned official Node.js runtime and
+verifies its SHA-256 checksum.
 
-Do not use the operator's own workstation as the first test client.
+The managed runtime supports either an existing healthy AmneziaWG2 Docker
+container or a pre-existing VPN interface in the host Linux namespace. A host
+`linux_interface` source must use an external SOCKS5 endpoint or a different
+pre-existing tunnel interface; managed Tailscale currently requires the
+container-source adapter.
 
-## Local validation
+## 1. Prepare the VPN and strict egress
 
-```sh
-npm ci
-npm test
-npm run validate
-./lab/verify.sh
-./lab/redirect/verify.sh
-```
+Before installing VPN Router, provide:
 
-Render and container-check the private deployment configuration without
-contacting a server:
+- an existing AmneziaWG2 container or host VPN interface and its interface name;
+- the VPN client subnet and one unused test-client address;
+- one strict egress: a Tailscale exit node, reachable unauthenticated SOCKS5
+  endpoint, or pre-existing tunnel interface;
+- a credential-free HTTPS URL for egress health checks.
 
-```sh
-./scripts/prepare-amneziawg2-artifacts.sh \
-  --config ./router.yaml \
-  --output-dir ./build/vpn-router
-```
+Do not use the administrator workstation as the first test client. VPN Router
+does not install or replace the source VPN server.
 
-The command checks sing-box, nftables, and dnsmasq against pinned images. The
-output directory is local deployment material and must not be committed.
+## 2. Install from a release checkout
 
-## Native AmneziaWG2 client test
-
-An Amnezia `vpn://` profile is sufficient when it embeds the native AWG2
-configuration. On a separate Linux host:
+Clone or unpack a reviewed release, then run:
 
 ```sh
-sudo ./scripts/run-isolated-amneziawg2-client.sh \
-  --input ./client-profile.vpn
+git clone https://github.com/rim/vpn-router.git
+cd vpn-router
+sudo ./install.sh install --install-dependencies
 ```
 
-The runner creates a mode-`0600` native profile in a private temporary
-directory, starts the pinned `amneziavpn/amneziawg-go` image without host
-networking or `--privileged`, and removes the container and extracted profile.
-It never prints profile contents. Delete the original transferred `.vpn` file
-after the result has been recorded.
+`--install-dependencies` supports Debian and Ubuntu. It installs common network
+tools. When Docker already comes from the distribution, it first installs that
+distribution's compatible Compose v2 package. Only when Docker is absent does
+it configure Docker's official package repository and install Docker Engine
+plus Compose. Without this flag, the installer reports missing prerequisites
+and does not change system packages.
 
-When Node.js is intentionally absent on the isolated host, extract locally and
-transfer only the mode-`0600` native file, then use
-`--native-config ./awg0.conf`. Delete the transferred file immediately after
-the runner exits.
+The source checkout is no longer required after a successful installation.
+Each installed tree is immutable and addressed by the project version plus a
+source hash. The stable `current` symlink is replaced atomically.
 
-## Prepare the live configuration
+## 3. Create the private configuration
 
-Copy `config.example.yaml` outside Git. Set:
+Run the interactive wizard:
 
-- the real Amnezia container and interface names;
-- one canary `/32` in `client_scope.addresses` for the first enable;
-- a unique `resources.service_name` and nftables table;
-- a credential-free HTTPS `healthcheck_url` that is reachable through the
-  selected exit.
+```sh
+sudo vpn-router configure --output /etc/vpn-router/router.yaml
+```
 
-For `tailscale_socks`, also set the exit-node full hostname or IP and set
-`proxy_server` to `<service_name>-egress`. For `socks5`, set the external server
-and port. For `linux_interface`, ensure the named egress interface already
-exists inside the Amnezia source namespace.
+The wizard writes mode `0600`, refuses accidental overwrite, stores no secret,
+and defaults to one canary `/32`. For unattended provisioning:
 
-For first Tailscale enrollment, export the auth key only in the root session:
+```sh
+sudo vpn-router configure \
+  --non-interactive \
+  --output /etc/vpn-router/router.yaml \
+  --source-type amneziawg2_container \
+  --source-container amnezia-awg \
+  --source-interface awg0 \
+  --client-scope address_list \
+  --client-addresses 10.8.1.2/32 \
+  --egress-type tailscale_socks \
+  --exit-node exit-node.example.ts.net \
+  --healthcheck-url https://example.com/ \
+  --domains .ru,.xn--p1ai,.su
+```
+
+Replace every example topology value. The `.ru`, `.xn--p1ai`, and `.su`
+suffixes are merely an example policy; add or remove suffixes for the region or
+services you need. See the [configuration reference](../developer/configuration.md)
+for external SOCKS5 and Linux-interface egresses.
+
+Validate without changing networking:
+
+```sh
+sudo vpn-router validate
+sudo vpn-router preflight
+```
+
+## 4. Enroll Tailscale without storing an auth key
+
+For first Tailscale enrollment only, export an ephemeral or reusable auth key
+in the root session or inject it from a secret manager:
 
 ```sh
 export VPN_ROUTER_TAILSCALE_AUTH_KEY='set-in-a-secret-manager-or-root-session'
-```
-
-The lifecycle immediately recreates a newly enrolled egress with the persisted
-state and an empty `TS_AUTHKEY`, then verifies the container environment. Also
-remove the key from the invoking root shell after the command returns. State is
-persisted under `/var/lib/<service_name>/egress-tailscale/`.
-
-## Lifecycle commands
-
-Run preflight first. It is read-only with respect to host routes, firewall,
-containers, and networks; its validation containers are disposable.
-
-```sh
 sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
-  ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
+  vpn-router enable --rollback-after 600
+unset VPN_ROUTER_TAILSCALE_AUTH_KEY
 ```
 
-Enable always requires a server-side rollback timeout:
+The egress is immediately recreated from persisted state with an empty
+`TS_AUTHKEY` environment. Subsequent starts use the encrypted Tailnet state
+under `/var/lib/<service_name>/egress-tailscale/` and need no auth key.
+
+For external SOCKS5 or Linux-interface egress, run the same `enable` command
+without the environment variable.
+
+## 5. Verify the canary and cancel the deadman
+
+`enable` always arms a server-side rollback timer before changing networking.
+While it is active, test from the canary VPN client:
+
+1. an ordinary domain uses the source VPN server's normal egress;
+2. a selected domain uses the strict exit;
+3. system DNS resolves both classes;
+4. stopping the strict egress blocks selected destinations rather than leaking
+   them directly;
+5. an unselected client remains unaffected;
+6. SSH and host/source default routes remain unchanged.
+
+Inspect internal state without cancelling the timer:
 
 ```sh
-sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
-  ./scripts/vpn-router-lifecycle.sh enable \
-  --config ./router.yaml \
-  --rollback-after 600
+sudo vpn-router status
+sudo vpn-router verify
 ```
 
-The lifecycle stores a root-only baseline, generated artifacts, copied config,
-checksums, and ownership manifest below `/var/lib/<service_name>/runtime/`.
-It refuses pre-existing names or the configured nftables table without a
-matching active manifest.
-
-Check local state without cancelling the deadman:
+Only after the external matrix passes:
 
 ```sh
-sudo ./scripts/vpn-router-lifecycle.sh status --config ./router.yaml
-sudo ./scripts/vpn-router-lifecycle.sh verify --config ./router.yaml
+sudo vpn-router verify --cancel-deadman
 ```
 
-Only after the external acceptance matrix passes, cancel the timer:
+To expand from a canary to more users, edit the configuration only while the
+router is disabled, validate it, then repeat enable and verification. Use an
+explicit `address_list` before changing to the complete VPN `subnet`.
+
+## 6. Use the routing switch
 
 ```sh
-sudo ./scripts/vpn-router-lifecycle.sh verify \
-  --config ./router.yaml \
-  --cancel-deadman
+sudo vpn-router disable
+sudo vpn-router enable --rollback-after 600
 ```
 
-Disable is the normal idempotent routing switch:
+`disable` removes only project-owned policy resources. It preserves the source
+VPN, its clients, external egresses, and Tailscale enrollment state. `rollback`
+is the failure-recovery alias; both operations are idempotent.
+
+## 7. Enable boot recovery
+
+Enable boot recovery only after the manual canary and outage matrix has passed:
 
 ```sh
-sudo ./scripts/vpn-router-lifecycle.sh disable --config ./router.yaml
+sudo vpn-router service-enable
 ```
 
-It preserves the Tailscale state directory and the existing AmneziaWG2
-container. A recreated source container invalidates verification; re-run
-preflight and enable after confirming the new namespace. Use `rollback` for
-failure recovery; `apply` remains an alias for `enable`.
+The oneshot systemd service waits up to three minutes for the source VPN,
+reconciles the recorded deployment with a ten-minute deadman, verifies internal
+adapter health, and only then cancels that timer. On service stop it disables
+routing before Docker stops.
 
-While a manifest is active, all lifecycle commands require the exact config
-revision recorded at apply time. If the operator copy changed, use the
-root-only `/var/lib/<service_name>/runtime/config.yaml` to verify or roll back.
+A normal container restart retains its identity. If the source container was
+recreated, `reconcile` archives the previous root-only manifest, removes stale
+project-owned sidecars, and applies to the new namespace. It refuses recovery
+when project-named nftables or network resources already exist in that new
+namespace.
 
-## Current deployment boundary
+```sh
+sudo vpn-router service-status
+sudo vpn-router service-disable
+```
 
-The bundled lifecycle manages an `amneziawg2_container` source with any current
-strict egress type. An external SOCKS5 service or tunnel interface remains
-operator-owned and must exist before preflight. A `linux_interface` source is
-supported by validation and artifact generation, but does not yet have a
-bundled host-namespace lifecycle adapter.
+Automatic boot verification proves internal health, not the complete external
+client acceptance matrix. Monitor both direct and strict paths after host,
+Docker, VPN, or exit-node maintenance.
+
+## 8. Upgrade or roll back the installed code
+
+From a newly reviewed release checkout:
+
+```sh
+sudo ./install.sh upgrade
+sudo vpn-router version
+sudo vpn-router status
+sudo vpn-router verify
+```
+
+Upgrade validates the installed configuration with the candidate before
+atomically changing `current`. It does not widen client scope, restart the
+source VPN, or automatically replace the active data plane. The previous code
+tree is retained:
+
+```sh
+sudo ./install.sh rollback-version
+sudo vpn-router verify
+```
+
+Disable routing before a configuration schema migration or any upgrade that
+the release notes mark as data-plane incompatible.
+
+## 9. Uninstall
+
+Safe uninstall disables an active owned runtime first and aborts if cleanup
+cannot be proved. It removes installed code, command, and service while keeping
+configuration and persistent egress state:
+
+```sh
+sudo ./install.sh uninstall
+```
+
+After making a separate backup, explicitly purge configuration and owned state:
+
+```sh
+sudo ./install.sh uninstall --purge
+```
+
+Purge never removes the source VPN container, VPN profiles, an external SOCKS5
+service, or an external tunnel interface.
+
+## Local contributor verification
+
+Contributors can test the repository without installing it:
+
+```sh
+npm ci
+npm run check
+npm run check:containers
+npm run check:clean-host
+```
+
+The clean-host check uses a disposable pinned Ubuntu container to prove install,
+configuration, validation, upgrade, version rollback, safe uninstall, and
+configuration retention. It is not a substitute for a real VPN data-path or
+systemd reboot test.

@@ -60,6 +60,7 @@ resources:
     writeFileSync(configPath, config, { mode: 0o600 });
     const output = execFileSync(process.execPath, [binPath.pathname, 'render-runtime-env', '--config', configPath], { encoding: 'utf8' });
     assert.match(output, /^TAILSCALE_HEALTHCHECK_URL='https:\/\/example[.]com\//m);
+    assert.match(output, /^MANAGED_DNS_REQUIRED='true'$/m);
     assert.match(output, /'"'"'/);
     assert.equal(output.split('\n').filter(Boolean).every((line) => /^[A-Z_]+='.*'$/.test(line)), true);
     execFileSync('bash', ['-eu', '-c', 'eval "$1"; test "$TAILSCALE_HEALTHCHECK_URL" = "$2"', 'vpn-router-test', output, healthcheck], { stdio: 'pipe' });

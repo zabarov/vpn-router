@@ -27,7 +27,7 @@ services:
   vpn-router-dns:
     build:
       context: ./dnsmasq
-    image: vpn-router-dns:0.3.0-pre-alpha
+    image: vpn-router-dns:0.4.0-pre-alpha
     container_name: ${VPN_ROUTER_DNS_SERVICE_NAME:-vpn-router-dns}
     network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
     restart: unless-stopped

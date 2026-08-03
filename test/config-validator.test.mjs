@@ -33,6 +33,7 @@ test('accepts a provider-neutral Linux interface source', () => {
     interface: 'wg0',
     client_subnet: '10.8.1.2/32'
   };
+  config.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'egress.example.net', port: 1080, healthcheck_url: 'https://example.com/' };
   config.policies.forEach((policy) => { policy.source = 'generic-vpn'; });
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 });
@@ -189,6 +190,23 @@ test('accepts a provider-neutral Linux interface strict egress', () => {
   const config = validConfig();
   config.egresses[1] = { tag: 'regional-exit', type: 'linux_interface', interface: 'wg-exit', healthcheck_url: 'https://example.com/' };
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('requires a separately reachable strict egress for a host Linux source', () => {
+  const config = validConfig();
+  config.sources[0] = {
+    tag: 'vpn-in', type: 'linux_interface', interface: 'tun0', client_subnet: '10.8.1.2/32'
+  };
+  for (const policy of config.policies) policy.source = 'vpn-in';
+  assert.match(validateConfig(config).errors.join('\n'), /requires an external SOCKS5 or Linux-interface strict egress/);
+
+  config.egresses[1] = {
+    tag: config.egresses[1].tag,
+    type: 'linux_interface',
+    interface: 'tun0',
+    healthcheck_url: 'https://example.com/'
+  };
+  assert.match(validateConfig(config).errors.join('\n'), /source and strict egress interfaces must be different/);
 });
 
 test('rejects duplicate destination entries', () => {

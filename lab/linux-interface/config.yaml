@@ -1,0 +1,47 @@
+schema_version: "1.0"
+
+sources:
+  - tag: host-vpn
+    type: linux_interface
+    interface: vpr-in
+    client_scope:
+      mode: address_list
+      addresses: [10.55.0.2/32]
+
+capture:
+  type: redirect
+  listen_port: 15001
+
+egresses:
+  - tag: strict-egress
+    type: socks5
+    server: 127.0.0.1
+    port: 18080
+    healthcheck_url: https://example.com/
+  - tag: direct
+    type: direct
+
+policies:
+  - tag: strict-target
+    source: host-vpn
+    destination_sets: [strict-target]
+    egress: strict-egress
+    failure_mode: block
+  - tag: default-direct
+    source: host-vpn
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  strict-target:
+    ip_cidrs: [192.0.2.20/32]
+
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+
+resources:
+  nftables_table: vpr_host_lab
+  service_name: vpr-host-lab

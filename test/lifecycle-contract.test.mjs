@@ -97,6 +97,18 @@ test('external egress adapters are health-checked but never lifecycle-owned', as
   assert.doesNotMatch(apply, /docker (?:stop|rm).*STRICT_EGRESS/);
 });
 
+test('managed lifecycle supports a host Linux VPN interface without container ownership', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  assert.match(source, /compose[.]linux-interface[.]yaml/);
+  assert.match(source, /uses_container_source\(\)/);
+  assert.match(source, /printf 'host:%s'.*boot_id/);
+  assert.match(source, /source_container_running=not_applicable/);
+  assert.match(source, /a host Linux source requires an external SOCKS5 or Linux-interface egress/);
+  assert.doesNotMatch(source, /managed apply currently supports amneziawg2_container/);
+  assert.match(source, /if uses_managed_dns; then\s+compose up -d vpn-router-dns vpn-router/);
+  assert.match(source, /dns_running=not_applicable/);
+});
+
 test('the rollback deadman is armed before the first live runtime step', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const manifest = source.indexOf('write_manifest applying "$backup_dir" false');

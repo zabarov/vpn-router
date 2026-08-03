@@ -59,6 +59,9 @@ async function main(argv) {
       SOURCE_INTERFACE: source.interface,
       CLIENT_SCOPE_MODE: clientScope.mode,
       CLIENT_SCOPE_CIDRS: clientScope.cidrs.join(','),
+      MANAGED_DNS_REQUIRED: strictPolicy.destination_sets.some((name) =>
+        (config.destination_sets[name]?.domain_suffixes ?? []).length > 0
+      ),
       STRICT_EGRESS_TAG: strictEgress.tag,
       STRICT_EGRESS_TYPE: strictEgress.type,
       STRICT_EGRESS_SERVER: strictEgress.proxy_server ?? strictEgress.server ?? 'none',

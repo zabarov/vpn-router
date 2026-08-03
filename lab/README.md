@@ -48,3 +48,11 @@ user-owned Tailnet node and an enrollment method.
 [The TCP redirect lab](redirect/README.md) routes a packet through a running
 sidecar, then stops that sidecar and verifies that the strict destination does
 not leak through the direct path.
+
+## Host Linux VPN interface proof
+
+`linux-interface/verify.sh` is a root-only Linux integration lab for a VPN
+interface in the host namespace. It creates exact-name disposable interfaces
+and a client namespace, proves strict/direct behavior, exercises SOCKS and
+capture outages, runs the boot helper, and cleans every owned resource. CI runs
+it on an ephemeral Ubuntu runner.

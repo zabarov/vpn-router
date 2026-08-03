@@ -35,6 +35,13 @@ internal proxy network is recorded separately and uses negative gateway
 priority. The lifecycle compares its default-route fingerprint before and
 after that connection.
 
+For a host `linux_interface` source, capture and DNS sidecars use host
+networking and the one owned nftables table lives in the host namespace. The
+source VPN interface remains borrowed: VPN Router does not create, restart,
+reconfigure, or delete it. Managed Tailscale is not exposed in this topology;
+the strict egress must be an external SOCKS5 service or a different existing
+tunnel interface.
+
 The internal proxy network has no host-published port. Only the source
 namespace and Tailscale egress join it. Tailscale also joins a separate control
 network and runs in userspace mode.
@@ -43,8 +50,10 @@ network and runs in userspace mode.
 
 1. Validate config, interface, source container, IPv4-only boundary, names, and
    absent-or-managed resources.
-2. Render and syntax-check sing-box, nftables, and dnsmasq.
-3. Build the pinned dnsmasq image and validate its configuration.
+2. Render and syntax-check sing-box and nftables. For a domain-suffix policy,
+   also render and validate dnsmasq.
+3. Build the pinned dnsmasq image only when managed DNS is required. An
+   IP/CIDR-only policy does not start or pull a DNS sidecar.
 4. Capture a root-only baseline, write an `applying` ownership manifest, and
    arm the server-owned rollback deadman before the first network mutation.
 5. For Tailscale, start only its sidecar and require a running backend, an online selected exit,
@@ -57,8 +66,8 @@ network and runs in userspace mode.
    egress, run three consecutive adapter-specific HTTPS checks without creating
    or changing the external dependency.
 7. Apply the one owned nftables table. No policy rule or route table is added.
-8. Start DNS and capture sidecars, verify every owned component, and mark the
-   manifest `applied`.
+8. Start the capture sidecar and, when required by policy, the DNS sidecar.
+   Verify every owned component and mark the manifest `applied`.
 
 Any failure after the intent manifest triggers rollback. Repeating `apply` with
 the exact verified configuration is a no-op except for rearming the deadman.
@@ -89,3 +98,22 @@ completed rollback and `ALREADY_ABSENT` when no manifest exists.
 The lifecycle never flushes the global nftables ruleset, changes the host
 default route or DNS, deletes unrelated Docker resources, modifies the
 AmneziaWG2 profile, or removes Tailscale state.
+
+## Installed release and boot ownership
+
+The installer owns `/opt/vpn-router`, `/usr/local/sbin/vpn-router`,
+`/var/lib/vpn-router-installer`, and the optional
+`/etc/systemd/system/vpn-router.service`. Configuration under
+`/etc/vpn-router` and runtime state under `/var/lib/<service_name>` are
+preserved by default uninstall.
+
+An upgrade writes a new immutable content-addressed release, validates the
+installed configuration with that candidate, atomically changes `current`, and
+retains the old target as `previous`. It does not restart the source VPN or
+silently widen client scope.
+
+The opt-in systemd service calls `reconcile` at boot with a rollback deadman.
+If the source container identity changed, recovery archives the old manifest
+and removes only stale project-owned Compose resources. It refuses recovery if
+the replacement namespace already contains the configured nftables table or is
+already attached to the project proxy network.

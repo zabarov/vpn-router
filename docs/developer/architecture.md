@@ -77,7 +77,7 @@ into an accidental block or fallback decision.
 
 ## Protocol boundary
 
-Version `0.3.0-pre-alpha` supports IPv4/TCP only. Selected UDP is rejected and
+Version `0.4.0-pre-alpha` supports IPv4/TCP only. Selected UDP is rejected and
 UDP/443 is rejected for the canary so clients can retry over TCP. A global IPv6
 address on the source interface makes managed preflight fail. IPv6 requires a
 future source identity and routing design that can preserve the `/32` isolation

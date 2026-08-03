@@ -253,6 +253,14 @@ export function validateConfig(config) {
     if (defaultPolicy.failure_mode !== 'direct' || defaultEgress?.type !== 'direct') errors.push(`default policy ${defaultPolicy.tag ?? '<unknown>'} must use a direct egress with failure_mode direct`);
   }
   if (strictPolicy && defaultPolicy && strictPolicy.source !== defaultPolicy.source) errors.push('strict and default policies must reference the same source');
+  const activeSource = config.sources.find(isObject);
+  const activeStrictEgress = strictEgresses[0];
+  if (activeSource?.type === 'linux_interface' && activeStrictEgress?.type === 'tailscale_socks') {
+    errors.push('a Linux interface source requires an external SOCKS5 or Linux-interface strict egress');
+  }
+  if (activeSource?.type === 'linux_interface' && activeStrictEgress?.type === 'linux_interface' && activeSource.interface === activeStrictEgress.interface) {
+    errors.push('source and strict egress interfaces must be different');
+  }
   const referencedEgresses = new Set(config.policies.filter(isObject).map((policy) => policy.egress));
   for (const egress of config.egresses.filter(isObject)) {
     if (!referencedEgresses.has(egress.tag)) errors.push(`egress ${egress.tag ?? '<unknown>'} is not referenced by a policy`);

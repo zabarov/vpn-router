@@ -3,12 +3,11 @@
 set -euo pipefail
 
 readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
-readonly ALPINE_IMAGE='alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d'
-readonly DNS_IMAGE='vpn-router-dns:0.3.0-pre-alpha'
+readonly DNS_IMAGE='vpn-router-dns:0.4.0-pre-alpha'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
-compose_file="$repo_dir/deploy/compose.amneziawg2.yaml"
+node_bin=${VPN_ROUTER_NODE:-node}
 
 command_name=${1-}
 if [[ -n "$command_name" ]]; then shift; fi
@@ -27,6 +26,7 @@ Usage:
   vpn-router-lifecycle.sh status --config <router.yaml>
   vpn-router-lifecycle.sh verify --config <router.yaml> [--cancel-deadman]
   vpn-router-lifecycle.sh rollback --config <router.yaml>
+  vpn-router-lifecycle.sh reconcile --config <router.yaml> --rollback-after <60-3600>
 EOF
 }
 
@@ -50,10 +50,10 @@ while (($# > 0)); do
 done
 
 case "$command_name" in
-  preflight|enable|disable|apply|status|verify|rollback) ;;
+  preflight|enable|disable|apply|status|verify|rollback|reconcile) ;;
   *) usage; exit 2 ;;
 esac
-if [[ "$command_name" != apply && "$command_name" != enable && -n "$rollback_after" ]] \
+if [[ "$command_name" != apply && "$command_name" != enable && "$command_name" != reconcile && -n "$rollback_after" ]] \
   || [[ "$command_name" != verify && "$cancel_deadman" == true ]] \
   || [[ "$command_name" != rollback && "$deadman_call" == true ]]; then
   usage
@@ -78,13 +78,19 @@ chmod 600 "$invocation_config"
 cp -- "$config_path" "$invocation_config"
 config_path=$invocation_config
 
-node "$repo_dir/bin/vpn-router.mjs" validate --config "$config_path" >/dev/null
+"$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$config_path" >/dev/null
 # render-runtime-env emits POSIX-quoted assignments and never emits a
 # credential value; only the validated credential variable name is included.
-eval "$(node "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path")"
+eval "$("$node_bin" "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path")"
 
-if [[ "$SOURCE_TYPE" != amneziawg2_container ]]; then
-  echo 'lifecycle=FAIL: managed apply currently supports amneziawg2_container; linux_interface remains a provider-neutral render adapter' >&2
+if [[ "$SOURCE_TYPE" == amneziawg2_container ]]; then
+  compose_file="$repo_dir/deploy/compose.amneziawg2.yaml"
+else
+  compose_file="$repo_dir/deploy/compose.linux-interface.yaml"
+fi
+readonly compose_file
+if [[ "$SOURCE_TYPE" == linux_interface && "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
+  echo 'lifecycle=FAIL: a host Linux source requires an external SOCKS5 or Linux-interface egress; managed Tailscale currently requires a container source' >&2
   exit 1
 fi
 if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks && "$TAILSCALE_PROXY_SERVER" != "${SERVICE_NAME}-egress" ]]; then
@@ -111,6 +117,14 @@ uses_managed_tailscale() {
   [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]
 }
 
+uses_managed_dns() {
+  [[ "$MANAGED_DNS_REQUIRED" == true ]]
+}
+
+uses_container_source() {
+  [[ "$SOURCE_TYPE" == amneziawg2_container ]]
+}
+
 compose() {
   env \
     VPN_ROUTER_SOURCE_CONTAINER="$SOURCE_CONTAINER" \
@@ -129,7 +143,11 @@ compose() {
 }
 
 source_exec() {
-  nsenter --target "$(source_pid)" --net -- "$@"
+  if uses_container_source; then
+    nsenter --target "$(source_pid)" --net -- "$@"
+  else
+    "$@"
+  fi
 }
 
 source_pid() {
@@ -137,7 +155,11 @@ source_pid() {
 }
 
 source_id() {
-  docker inspect --format '{{.Id}}' "$SOURCE_CONTAINER"
+  if uses_container_source; then
+    docker inspect --format '{{.Id}}' "$SOURCE_CONTAINER"
+  else
+    printf 'host:%s' "$(cat /proc/sys/kernel/random/boot_id)"
+  fi
 }
 
 container_exists() {
@@ -154,6 +176,7 @@ egress_auth_key_scrubbed() {
 }
 
 source_on_proxy_network() {
+  uses_container_source || return 1
   docker network inspect "$PROXY_NETWORK" \
     --format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' 2>/dev/null \
     | grep -Fxq "$SOURCE_CONTAINER"
@@ -171,7 +194,7 @@ normalize_network_json() {
   local source=$1 destination=$2
   # JavaScript template syntax is intentionally passed verbatim to Node.
   # shellcheck disable=SC2016
-  node -e '
+  "$node_bin" -e '
     const fs = require("node:fs");
     const volatile = new Set(["expires", "preferred_life_time", "valid_life_time"]);
     const normalize = (value) => {
@@ -225,21 +248,24 @@ render_artifacts() {
   local destination=$1
   mkdir -p "$destination"
   chmod 700 "$destination"
-  node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$config_path" >"$destination/sing-box.json"
-  node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$config_path" >"$destination/vpn-router.nft"
-  node "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$config_path" >"$destination/dnsmasq.conf"
+  "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$config_path" >"$destination/sing-box.json"
+  "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$config_path" >"$destination/vpn-router.nft"
+  "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$config_path" >"$destination/dnsmasq.conf"
   chmod 600 "$destination"/*
 }
 
 validate_artifacts() {
   local destination=$1
   docker run --rm -v "$destination/sing-box.json:/config.json:ro" "$SING_BOX_IMAGE" check -c /config.json >/dev/null
-  docker run --rm --cap-add NET_ADMIN -v "$destination/vpn-router.nft:/rules.nft:ro" "$ALPINE_IMAGE" \
-    sh -ec 'apk add --no-cache nftables >/dev/null && nft -c -f /rules.nft'
+  source_exec nft -c -f - <"$destination/vpn-router.nft"
 }
 
 require_base_runtime() {
-  command -v node >/dev/null
+  if [[ "$node_bin" == */* ]]; then
+    [[ -x "$node_bin" ]]
+  else
+    command -v "$node_bin" >/dev/null
+  fi
   command -v docker >/dev/null
   command -v nsenter >/dev/null
   command -v ip >/dev/null
@@ -247,14 +273,18 @@ require_base_runtime() {
   command -v curl >/dev/null
   docker info >/dev/null
   docker compose version >/dev/null
-  docker network connect --help | grep -Fq -- '--gw-priority' || {
-    echo 'preflight=FAIL: Docker Engine must support network gateway priorities' >&2
-    return 1
-  }
-  container_running "$SOURCE_CONTAINER" || {
-    echo "preflight=FAIL: source container is not running" >&2
-    return 1
-  }
+  if uses_managed_tailscale; then
+    docker network connect --help | grep -Fq -- '--gw-priority' || {
+      echo 'preflight=FAIL: Docker Engine must support network gateway priorities' >&2
+      return 1
+    }
+  fi
+  if uses_container_source; then
+    container_running "$SOURCE_CONTAINER" || {
+      echo "preflight=FAIL: source container is not running" >&2
+      return 1
+    }
+  fi
   source_exec ip -o link show dev "$SOURCE_INTERFACE" >/dev/null
   source_exec ip -o -4 addr show dev "$SOURCE_INTERFACE" | grep -q 'inet '
   if source_exec ip -o -6 addr show dev "$SOURCE_INTERFACE" scope global | grep -q 'inet6 '; then
@@ -281,12 +311,14 @@ require_unowned_or_managed_state() {
       return 1
     fi
   done
-  for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
-    if docker network inspect "$name" >/dev/null 2>&1; then
-      echo "preflight=FAIL: Docker network name is already in use: $name" >&2
-      return 1
-    fi
-  done
+  if uses_managed_tailscale; then
+    for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
+      if docker network inspect "$name" >/dev/null 2>&1; then
+        echo "preflight=FAIL: Docker network name is already in use: $name" >&2
+        return 1
+      fi
+    done
+  fi
 }
 
 preflight_command() {
@@ -353,7 +385,11 @@ capture_backup() {
   mkdir -p "$RUNTIME_DIR/backups"
   backup_dir=$(mktemp -d "$RUNTIME_DIR/backups/$timestamp.XXXXXX")
   chmod 700 "$backup_dir"
-  docker inspect "$SOURCE_CONTAINER" >"$backup_dir/source-container.json"
+  if uses_container_source; then
+    docker inspect "$SOURCE_CONTAINER" >"$backup_dir/source-container.json"
+  else
+    printf 'linux_interface\n' >"$backup_dir/source-kind.txt"
+  fi
   docker ps -a --no-trunc >"$backup_dir/docker-containers.txt"
   docker network ls --no-trunc >"$backup_dir/docker-networks.txt"
   ip -j address show >"$backup_dir/host-addresses.json"
@@ -438,7 +474,7 @@ wait_for_tailscale() {
   local _attempt status_summary backend_state='unknown' exit_online='false'
   for _attempt in {1..45}; do
     status_summary=$(docker exec "$EGRESS_NAME" tailscale status --json 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write((j.BackendState||"unknown")+" "+(j.ExitNodeStatus?.Online===true?"true":"false"))}catch{process.stdout.write("unknown false")}})' \
+      | "$node_bin" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.stdout.write((j.BackendState||"unknown")+" "+(j.ExitNodeStatus?.Online===true?"true":"false"))}catch{process.stdout.write("unknown false")}})' \
       || true)
     read -r backend_state exit_online <<<"$status_summary"
     if [[ "$backend_state" == Running && "$exit_online" == true ]]; then
@@ -514,13 +550,13 @@ verify_internal() {
   [[ "$MANIFEST_SOURCE_ID" == "$(source_id)" ]] || return 1
   owned_table_exists || return 1
   container_running "$CAPTURE_NAME" || return 1
-  container_running "$DNS_NAME" || return 1
+  if uses_managed_dns; then container_running "$DNS_NAME" || return 1; fi
   if uses_managed_tailscale; then
     container_running "$EGRESS_NAME" || return 1
     egress_auth_key_scrubbed || return 1
     source_on_proxy_network || return 1
     docker exec "$EGRESS_NAME" tailscale status --json 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.BackendState==="Running"&&j.ExitNodeStatus?.Online===true?0:1)}catch{process.exit(1)}})' \
+      | "$node_bin" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.BackendState==="Running"&&j.ExitNodeStatus?.Online===true?0:1)}catch{process.exit(1)}})' \
       || return 1
   fi
   wait_for_socks_egress >/dev/null || return 1
@@ -558,9 +594,11 @@ rollback_command() {
       for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
         container_exists "$name" && runtime_absent=false
       done
-      for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
-        docker network inspect "$name" >/dev/null 2>&1 && runtime_absent=false
-      done
+      if uses_managed_tailscale; then
+        for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
+          docker network inspect "$name" >/dev/null 2>&1 && runtime_absent=false
+        done
+      fi
       if [[ "$runtime_absent" == true ]]; then
         if [[ "$deadman_call" != true ]]; then cancel_deadman_timer; fi
         if [[ "$command_name" == disable ]]; then
@@ -602,9 +640,11 @@ rollback_command() {
   for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
     container_exists "$name" && rollback_ok=false
   done
-  for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
-    docker network inspect "$name" >/dev/null 2>&1 && rollback_ok=false
-  done
+  if uses_managed_tailscale; then
+    for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
+      docker network inspect "$name" >/dev/null 2>&1 && rollback_ok=false
+    done
+  fi
 
   if [[ "$rollback_ok" != true ]]; then
     write_manifest rollback_failed "$MANIFEST_BACKUP_DIR" "$MANIFEST_PROXY_CONNECTED" || true
@@ -623,6 +663,62 @@ rollback_command() {
   else
     echo 'rollback=PASS'
   fi
+}
+
+recover_recreated_source() {
+  [[ -f "$MANIFEST" ]] || return 0
+  source "$MANIFEST"
+  local current_source_id recovery_dir timestamp name
+  current_source_id=$(source_id 2>/dev/null || true)
+  [[ -n "$current_source_id" ]] || {
+    echo 'reconcile=FAIL: source container is unavailable' >&2
+    return 1
+  }
+  [[ "$current_source_id" != "$MANIFEST_SOURCE_ID" ]] || return 0
+  case "$MANIFEST_STATUS" in
+    applying|applied|rollback_failed) ;;
+    rolled_back|disabled) return 0 ;;
+    *) echo 'reconcile=FAIL: manifest has an unknown status' >&2; return 1 ;;
+  esac
+
+  # A recreated source has a new network namespace, so the old owned nftables
+  # table no longer exists. Refuse recovery if equivalent resources already
+  # exist in the new namespace because their ownership would be ambiguous.
+  if owned_table_exists || source_on_proxy_network; then
+    echo 'reconcile=FAIL: the recreated source already contains project-named resources' >&2
+    return 1
+  fi
+
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  recovery_dir="$RUNTIME_DIR/recovery/$timestamp"
+  mkdir -p "$recovery_dir"
+  chmod 700 "$RUNTIME_DIR/recovery" "$recovery_dir"
+  cp "$MANIFEST" "$recovery_dir/previous-manifest.env"
+  cp "$STORED_CONFIG" "$recovery_dir/previous-config.yaml"
+  printf '%s\n' "$current_source_id" >"$recovery_dir/replacement-source-id.txt"
+  chmod 600 "$recovery_dir"/*
+
+  cancel_deadman_timer
+  compose down --remove-orphans >/dev/null 2>&1 || {
+    echo 'reconcile=FAIL: stale owned containers or networks could not be removed' >&2
+    return 1
+  }
+  for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
+    if container_exists "$name"; then
+      echo "reconcile=FAIL: stale owned container remains: $name" >&2
+      return 1
+    fi
+  done
+  if uses_managed_tailscale; then
+    for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
+      if docker network inspect "$name" >/dev/null 2>&1; then
+        echo "reconcile=FAIL: stale owned network remains: $name" >&2
+        return 1
+      fi
+    done
+  fi
+  rm -f "$MANIFEST" "$STORED_CONFIG"
+  echo 'reconcile=SOURCE_RECREATION_RECOVERED'
 }
 
 apply_command() {
@@ -656,8 +752,10 @@ apply_command() {
   chmod 600 "$STORED_CONFIG"
   render_artifacts "$ARTIFACT_DIR"
   validate_artifacts "$ARTIFACT_DIR"
-  docker build -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
-  docker run --rm -v "$ARTIFACT_DIR/dnsmasq.conf:/etc/dnsmasq.conf:ro" "$DNS_IMAGE" --test >/dev/null
+  if uses_managed_dns; then
+    docker build -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
+    docker run --rm -v "$ARTIFACT_DIR/dnsmasq.conf:/etc/dnsmasq.conf:ro" "$DNS_IMAGE" --test >/dev/null
+  fi
   backup_dir=$(capture_backup)
   write_manifest applying "$backup_dir" false
   if ! arm_deadman_timer "$rollback_after"; then
@@ -686,14 +784,16 @@ apply_command() {
       source_default_after=$(source_exec ip -j route show default | sha256sum | awk '{print $1}') || return 1
       [[ "$source_default_before" == "$source_default_after" ]] || return 1
       write_manifest applying "$backup_dir" true || return 1
-      docker run --rm --network "container:$SOURCE_CONTAINER" "$ALPINE_IMAGE" \
-        nc -z -w 3 "$TAILSCALE_PROXY_SERVER" "$TAILSCALE_PROXY_PORT" || return 1
     fi
     wait_for_socks_egress || return 1
     source_exec nft -f - <"$ARTIFACT_DIR/vpn-router.nft" || return 1
-    compose up -d vpn-router-dns vpn-router || return 1
+    if uses_managed_dns; then
+      compose up -d vpn-router-dns vpn-router || return 1
+    else
+      compose up -d vpn-router || return 1
+    fi
     container_running "$CAPTURE_NAME" || return 1
-    container_running "$DNS_NAME" || return 1
+    if uses_managed_dns; then container_running "$DNS_NAME" || return 1; fi
     write_manifest applied "$backup_dir" "$(uses_managed_tailscale && echo true || echo false)" || return 1
     verify_internal || return 1
   }
@@ -711,6 +811,15 @@ apply_command() {
   echo "deadman=ARMED_${rollback_after}s"
 }
 
+reconcile_command() {
+  [[ $EUID -eq 0 ]] || {
+    echo 'reconcile=FAIL: root privileges are required' >&2
+    return 1
+  }
+  recover_recreated_source
+  apply_command
+}
+
 status_command() {
   if [[ ! -f "$MANIFEST" ]]; then
     echo 'status=NOT_APPLIED'
@@ -726,9 +835,17 @@ status_command() {
   echo "client_scope_mode=$CLIENT_SCOPE_MODE"
   echo "client_scope_entries=$(awk -F, '{print NF}' <<<"$CLIENT_SCOPE_CIDRS")"
   echo "strict_egress_type=$STRICT_EGRESS_TYPE"
-  echo "source_container_running=$(container_running "$SOURCE_CONTAINER" && echo true || echo false)"
+  if uses_container_source; then
+    echo "source_container_running=$(container_running "$SOURCE_CONTAINER" && echo true || echo false)"
+  else
+    echo 'source_container_running=not_applicable'
+  fi
   echo "capture_running=$(container_running "$CAPTURE_NAME" && echo true || echo false)"
-  echo "dns_running=$(container_running "$DNS_NAME" && echo true || echo false)"
+  if uses_managed_dns; then
+    echo "dns_running=$(container_running "$DNS_NAME" && echo true || echo false)"
+  else
+    echo 'dns_running=not_applicable'
+  fi
   if uses_managed_tailscale; then
     echo "egress_running=$(container_running "$EGRESS_NAME" && echo true || echo false)"
   else
@@ -759,6 +876,7 @@ verify_command() {
 case "$command_name" in
   preflight) preflight_command ;;
   enable|apply) apply_command ;;
+  reconcile) reconcile_command ;;
   status) status_command ;;
   verify) verify_command ;;
   disable|rollback)

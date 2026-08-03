@@ -1,5 +1,10 @@
 # Configuration reference
 
+The installed `vpn-router configure` wizard produces this schema interactively
+or with explicit non-interactive flags. It validates before writing, uses mode
+`0600`, refuses overwrite unless `--force` is provided, and never asks for or
+stores a credential value.
+
 The YAML contract is published as
 [`schema/config.schema.json`](../../schema/config.schema.json). The custom
 validator adds semantic safety rules that JSON Schema cannot express compactly.
@@ -58,9 +63,11 @@ sources:
       subnet: 10.8.1.0/24
 ```
 
-The provider-neutral generators support this adapter. The bundled managed
-lifecycle is currently limited to `amneziawg2_container`; a generic source
-still needs an operator-owned process supervisor in the same namespace.
+The bundled lifecycle runs the capture and DNS sidecars with host networking
+for this adapter and applies its owned nftables table in the host namespace.
+The VPN implementation remains operator-owned and is never restarted. Use an
+external `socks5` egress or a different `linux_interface`; managed Tailscale
+currently requires `amneziawg2_container`.
 
 ## Egresses
 
