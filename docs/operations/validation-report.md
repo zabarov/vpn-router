@@ -19,7 +19,8 @@ The two-client, two-target lab passed with the release routing model:
 - restarting SOCKS recovered in the same sing-box process;
 - stopping sing-box blocked strict traffic while direct traffic continued;
 - a second client outside the configured `/32` remained unaffected;
-- an explicit dynamic nftables element expired;
+- a selected nftables element persisted after managed DNS stopped, preventing
+  client-side DNS cache lifetime from creating a later direct leak;
 - all project containers, networks, and volumes were removed.
 
 The same lab passed after removing all Linux capabilities from the capture

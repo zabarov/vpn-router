@@ -22,7 +22,7 @@ changing its default route.
 ```text
 Amnezia namespace
   canary /32 -> awg0
-    |-- DNS :53 -> dnsmasq :5353 -> nftables DNS set (10 minute timeout)
+    |-- DNS :53 -> dnsmasq :5353 -> persistent nftables DNS set
     |-- selected TCP -> nftables REDIRECT -> sing-box
     |-- selected UDP / UDP 443 -> reject
     `-- everything else -> existing Amnezia NAT/direct path
@@ -42,11 +42,17 @@ returns; recovery does not require restarting the capture sidecar.
 
 ## Selection and fail-closed behavior
 
-dnsmasq adds only IPv4 answers for configured suffixes to a timeout-enabled
-nftables set. DNS replies and the dnsmasq cache are capped at 300 seconds. The
-nftables set retains addresses for ten minutes. The extra five-minute overlap
-prevents a cached DNS reply near expiry from outliving its strict-routing
-entry. Static CIDRs use a separate non-expiring set.
+dnsmasq adds only IPv4 answers for configured suffixes to a persistent
+nftables set. DNS replies and the dnsmasq cache are capped at 300 seconds, but
+client resolvers can retain an answer after the server cache has expired. A
+selected address therefore remains strict until lifecycle rollback or a fresh
+apply removes the owned table. This intentionally prefers temporary
+over-routing of a stale or shared address to a direct leak. Static CIDRs use a
+separate persistent set.
+
+After a fresh apply, the operator must flush the canary client's DNS cache or
+explicitly re-resolve the domains used for acceptance through managed DNS.
+Previously cached answers cannot be reconstructed from suffixes alone.
 
 Every generated DNS redirect, TCP redirect, forward guard, UDP, and QUIC rule
 matches both the source interface and `source.client_subnet`. The pre-alpha

@@ -50,8 +50,8 @@ to the new namespace until preflight, baseline, and canary are repeated.
 
 The disposable lab proves source `/32` matching, managed-DNS first-attempt
 selection, TCP-redirect and SOCKS dependency, fail-closed behavior for both
-outages, direct-path continuity, out-of-scope-client isolation, timeout expiry,
-and full cleanup. Native Linux and live canary results must still be recorded
+outages, direct-path continuity, out-of-scope-client isolation, selected-address
+persistence after managed DNS stops, and full cleanup. Native Linux and live canary results must still be recorded
 for each deployment; no generic lab result makes a host production-ready.
 
 ## Upstream references

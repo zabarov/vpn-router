@@ -30,7 +30,7 @@ export function generateNftablesConfig(config) {
     const cidrs = config.destination_sets[name].ip_cidrs ?? [];
     const suffixes = config.destination_sets[name].domain_suffixes ?? [];
     if (cidrs.length > 0) lines.push(`  set ${staticSetName(name)} { type ipv4_addr; flags interval; elements = { ${cidrs.join(', ')} } }`);
-    if (suffixes.length > 0) lines.push(`  set ${dnsSetName(name)} { type ipv4_addr; flags interval, timeout; timeout 10m; gc-interval 1m; }`);
+    if (suffixes.length > 0) lines.push(`  set ${dnsSetName(name)} { type ipv4_addr; flags interval; }`);
   }
 
   const strictSelectors = [];

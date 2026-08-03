@@ -17,7 +17,8 @@ test('generates an owned strict-only TCP redirect table with a forward guard', (
   const generated = generateNftablesConfig(config);
   assert.match(generated, /table inet vpn_router/);
   assert.match(generated, /set set_regional_services_static \{ type ipv4_addr; flags interval; elements = \{ 203\.0\.113\.0\/24 \} \}/);
-  assert.match(generated, /set set_regional_services_dns \{ type ipv4_addr; flags interval, timeout; timeout 10m; gc-interval 1m; \}/);
+  assert.match(generated, /set set_regional_services_dns \{ type ipv4_addr; flags interval; \}/);
+  assert.doesNotMatch(generated, /set_regional_services_dns[^\n]*timeout/);
   assert.match(generated, /iifname "awg0" ip saddr 10\.8\.1\.2\/32 udp dport 53 counter redirect to :5353/);
   assert.match(generated, /iifname "awg0" ip saddr 10\.8\.1\.2\/32 ip daddr @set_regional_services_dns meta l4proto tcp counter redirect to :12345/);
   assert.match(generated, /chain forward_guard \{[\s\S]*ip daddr @set_regional_services_dns meta l4proto tcp counter reject with tcp reset/);

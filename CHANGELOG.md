@@ -14,11 +14,11 @@ All notable changes are documented here.
 - Route all DNS-selected capture traffic directly to the strict SOCKS egress;
   remove secondary SNI/domain classification and its broad final block.
 - Split static and DNS-derived nftables sets, cap managed DNS and cache TTL at
-  300 seconds, and retain dynamic addresses for ten minutes so cache expiry
-  cannot race strict-set expiry.
+  300 seconds, and retain selected addresses until lifecycle cleanup so a
+  longer-lived client DNS cache cannot cause a later direct leak.
 - Add a two-client, two-target Docker lab that proves the first managed-DNS
-  connection, redirect and SOCKS outage behavior, direct continuity, timeout
-  expiry, isolation, and cleanup.
+  connection, redirect and SOCKS outage behavior, direct continuity,
+  selected-address persistence, isolation, and cleanup.
 - Resolve the isolated SOCKS service through uncached container DNS and require
   three consecutive HTTPS readiness probes so a Tailscale restart recovers
   without restarting sing-box.

@@ -20,8 +20,8 @@ lab's ordinary direct-path NAT lives in a separate handwritten nftables table.
 6. A managed DNS response inserts the selected address before the first client
    connection, and a stopped SOCKS egress makes that first connection fail
    closed instead of leaking direct.
-7. Dynamic DNS-set entries expire and all lab containers, networks and volumes
-   are removed automatically.
+7. Selected DNS-set entries persist after managed DNS stops and all lab
+   containers, networks and volumes are removed automatically.
 8. A transient negative Docker-DNS answer while the SOCKS service is stopped is
    not cached: the same sing-box process recovers after the service starts.
 
