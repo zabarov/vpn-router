@@ -50,3 +50,17 @@ test('CI actions use commit SHAs and run both verification layers', async () => 
   assert.match(workflow, /npm run check$/m);
   assert.match(workflow, /npm run check:containers$/m);
 });
+
+test('the redirect lab waits for real dependencies and preserves failure diagnostics', async () => {
+  const [composeText, verify] = await Promise.all([
+    text('../lab/redirect/compose.yaml'),
+    text('../lab/redirect/verify.sh')
+  ]);
+  const compose = parse(composeText);
+  assert.equal(compose.services.sidecar.depends_on['socks-egress'].condition, 'service_healthy');
+  assert.equal(compose.services.dns.depends_on['upstream-dns'].condition, 'service_healthy');
+  for (const name of ['sidecar', 'dns', 'upstream-dns', 'socks-egress']) {
+    assert.ok(compose.services[name].healthcheck, `${name} must publish a readiness check`);
+  }
+  assert.match(verify, /docker compose -f "\$compose_file" logs --no-color/);
+});

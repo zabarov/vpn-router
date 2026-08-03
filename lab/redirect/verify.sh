@@ -14,12 +14,19 @@ export VPN_ROUTER_LAB_SING_BOX_CONFIG="$artifact_dir/sing-box.json"
 export VPN_ROUTER_LAB_DNSMASQ_CONFIG="$artifact_dir/dnsmasq.conf"
 
 cleanup() {
+  cleanup_status=$?
+  if [ "$cleanup_status" -ne 0 ]; then
+    echo "Container lab diagnostics:" >&2
+    docker compose -f "$compose_file" ps --all >&2 || true
+    docker compose -f "$compose_file" logs --no-color >&2 || true
+  fi
   docker compose -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
   case "$artifact_dir" in
     /tmp/vpn-router-redirect-lab.*)
       if [ -d "$artifact_dir" ]; then rm -rf -- "$artifact_dir"; fi
       ;;
   esac
+  return "$cleanup_status"
 }
 trap cleanup EXIT INT TERM
 

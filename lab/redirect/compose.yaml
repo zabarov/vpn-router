@@ -68,7 +68,12 @@ services:
       source:
         condition: service_healthy
       socks-egress:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':3039 ' /proc/net/tcp || grep -q ':3039 ' /proc/net/tcp6"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
 
   dns:
     build:
@@ -91,7 +96,12 @@ services:
       source:
         condition: service_healthy
       upstream-dns:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':14E9 ' /proc/net/udp || grep -q ':14E9 ' /proc/net/udp6"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
 
   upstream-dns:
     build:
@@ -103,6 +113,11 @@ services:
     networks:
       lab:
         ipv4_address: 172.30.20.50
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':0035 ' /proc/net/udp || grep -q ':0035 ' /proc/net/udp6"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
 
   socks-egress:
     image: ghcr.io/sagernet/sing-box:v1.13.12@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
@@ -112,6 +127,11 @@ services:
     networks:
       lab:
         ipv4_address: 172.30.20.40
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':0438 ' /proc/net/tcp || grep -q ':0438 ' /proc/net/tcp6"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
 
   strict-target:
     image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
