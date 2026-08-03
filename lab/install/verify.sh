@@ -14,8 +14,7 @@ docker run --rm \
     /src/install.sh install --no-systemd --skip-runtime-check
     test "$(vpn-router version)" = "$(cat /src/VERSION)"
     vpn-router discover --help >/dev/null
-    vpn-router configure --non-interactive --output /etc/vpn-router/router.yaml \
-      --preset amnezia-tailscale \
+    vpn-router setup --non-interactive --output /etc/vpn-router/router.yaml \
       --source-container source-vpn --source-interface awg0 \
       --client-addresses 10.44.0.2/32 \
       --exit-node exit.example.ts.net >/dev/null

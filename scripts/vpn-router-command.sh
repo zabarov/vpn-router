@@ -11,6 +11,7 @@ usage() {
 Usage:
   vpn-router version
   vpn-router discover [--json]
+  vpn-router setup [options]
   vpn-router configure [wizard options]
   vpn-router validate [--config <path>]
   vpn-router doctor [--config <path>]
@@ -49,6 +50,12 @@ case "$command_name" in
     ;;
   configure)
     exec "$node_bin" "$repo_dir/bin/vpn-router-configure.mjs" "$@"
+    ;;
+  setup)
+    exec "$node_bin" "$repo_dir/bin/vpn-router-configure.mjs" \
+      --preset amnezia-tailscale \
+      --output "$default_config" \
+      "$@"
     ;;
   discover)
     exec "$node_bin" "$repo_dir/bin/vpn-router-discover.mjs" "$@"

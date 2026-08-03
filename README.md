@@ -4,6 +4,11 @@ VPN Router applies one strict, domain-oriented routing policy to traffic that
 arrives through a VPN. Selected IPv4/TCP destinations leave through a strict
 egress adapter; all other traffic keeps the VPN server's normal direct egress.
 
+For the common setup, install Amnezia normally through the AmneziaVPN
+application by entering the server IP, SSH login, and password. Amnezia creates
+the server container itself. VPN Router finds that container and adds routing;
+it does not replace or reinstall Amnezia.
+
 ```text
 VPN client -> VPN interface -> managed DNS/IP set -> TCP REDIRECT -> sing-box
                                                             -> strict egress -> exit node
@@ -43,28 +48,29 @@ Chrome Secure DNS, other DoH/DoT clients, ECH, direct-IP connections, and IPv6
 are outside the guaranteed mode. Use system DNS and disable those alternate
 paths for a strict canary.
 
-## Install on a server
+## Simple Amnezia and Tailscale setup
 
-On a Debian or Ubuntu host with an existing AmneziaWG2 Docker container:
+Tailscale is installed on the exit computer or exit server. Do **not** install
+Tailscale directly on the VPN server: VPN Router starts an isolated Tailscale
+container there automatically.
+
+After AmneziaWG 2 works on the Debian or Ubuntu VPN server:
 
 ```sh
 git clone https://github.com/zabarov/vpn-router.git
 cd vpn-router
 sudo ./install.sh install --install-dependencies
-sudo vpn-router discover
-sudo vpn-router configure \
-  --preset amnezia-tailscale \
-  --output /etc/vpn-router/router.yaml
+sudo vpn-router setup
 ```
 
 The installer provides a pinned private Node.js runtime, the `vpn-router`
 command, atomic upgrades, a previous-version rollback, safe uninstall, and an
 opt-in systemd service. It does not install or replace the source VPN.
 
-For the simplest complete path, follow [Amnezia and Tailscale quick
-start](docs/operations/tailscale-quickstart.md). It covers preparing an exit
-device, creating a one-off Tailscale key, safe first enrollment, testing one
-client, expanding to all VPN users, and using the routing switch.
+The setup wizard finds Amnezia automatically and asks only for the Tailscale
+exit node and domain suffixes. Follow the complete [simple Amnezia and
+Tailscale setup](docs/operations/tailscale-quickstart.md) for exit-device
+approval, one-off key enrollment, safe testing, and expansion to all users.
 
 For other egress adapters, read the complete [installation and lifecycle
 guide](docs/operations/installation.md) before `enable`. The first live client

@@ -3,6 +3,11 @@
 This guide starts with a clean Debian or Ubuntu host and ends with a reversible
 VPN Router service. Keep the first rollout limited to one test client `/32`.
 
+This is the advanced operator guide. If you installed Amnezia through the
+normal AmneziaVPN application and want a Tailscale exit, use the [simple setup
+guide](tailscale-quickstart.md). You do not install Tailscale directly on the
+VPN server in that setup; VPN Router runs it in an isolated container.
+
 ## Supported installation target
 
 The bundled installer supports x86-64 and ARM64 Debian/Ubuntu hosts with
@@ -11,8 +16,11 @@ systemd. It installs VPN Router under `/opt/vpn-router`, configuration under
 opt-in systemd service. It downloads the pinned official Node.js runtime and
 verifies its SHA-256 checksum.
 
-The managed runtime supports either an existing healthy AmneziaWG2 Docker
-container or a pre-existing VPN interface in the host Linux namespace. A host
+When a user enters server credentials in the AmneziaVPN application, Amnezia
+installs Docker and creates the AmneziaWG2 server container automatically. VPN
+Router borrows that running container without taking ownership of it. The
+managed runtime also supports a pre-existing VPN interface in the host Linux
+namespace. A host
 `linux_interface` source must use an external SOCKS5 endpoint or a different
 pre-existing tunnel interface; managed Tailscale currently requires the
 container-source adapter.
@@ -63,7 +71,15 @@ Inspect an Amnezia Docker source without changing it:
 sudo vpn-router discover
 ```
 
-For the common Amnezia plus Tailscale topology, use the guarded preset:
+For the common Amnezia plus Tailscale topology, use the simple setup wizard:
+
+```sh
+sudo vpn-router setup
+```
+
+It discovers the Amnezia topology and asks only for the exit node and domains.
+It requires a real configured test-client `/32`; it never substitutes example
+topology values. The equivalent explicit preset is:
 
 ```sh
 sudo vpn-router configure \
@@ -71,8 +87,7 @@ sudo vpn-router configure \
   --output /etc/vpn-router/router.yaml
 ```
 
-It requires a real configured test-client `/32`; it never substitutes example
-topology values. For a provider-neutral interactive setup, run:
+For a provider-neutral interactive setup, run:
 
 ```sh
 sudo vpn-router configure --output /etc/vpn-router/router.yaml

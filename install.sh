@@ -288,7 +288,7 @@ install_release() {
   echo "version=$version"
   echo "release=$release_id"
   if [[ ! -f "$config_path/router.yaml" ]]; then
-    echo "next=vpn-router configure --output $config_dir/router.yaml"
+    echo 'next=vpn-router setup (Amnezia plus Tailscale) or vpn-router configure (advanced)'
   else
     echo 'next=vpn-router preflight'
   fi

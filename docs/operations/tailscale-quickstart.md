@@ -1,35 +1,58 @@
-# Amnezia and Tailscale quick start
+# Simple setup: Amnezia with a Tailscale exit
 
-This guide configures selected domains from every Amnezia VPN client to leave
-through a Tailscale exit node. Other domains keep using the Amnezia server's
-normal internet connection.
+This is the shortest supported path for a server owner who already uses the
+Amnezia application. You do not need to understand Docker, nftables, or
+sing-box to follow it.
 
-Start with one test client. Expanding to every VPN user is the final step, not
-the first one.
+## What you install, and where
 
-## The three devices
+| Place | What you install | Who uses it |
+| --- | --- | --- |
+| Your phone or computer | AmneziaVPN | VPN users |
+| Your VPN server | Amnezia, then VPN Router | Administrator |
+| Your exit computer or exit server | Tailscale | Administrator |
 
-- **Exit device:** a computer or server in the location whose public internet
-  address selected domains should use. It runs Tailscale and stays online.
-- **VPN server:** the Debian or Ubuntu host that already runs the AmneziaWG2
-  server. VPN Router is installed here.
-- **Test client:** one phone or computer with an Amnezia profile. It proves the
-  policy before other VPN users are included.
+**Do not install Tailscale directly on the VPN server.** VPN Router starts its
+own isolated Tailscale container automatically. The system Tailscale package
+is neither required nor used there.
 
-The exit device and VPN server can be in different countries. End users do not
-install Tailscale; they continue to use only their normal Amnezia profile.
+An end user only opens AmneziaVPN and connects as usual. The routing policy is
+applied on the server.
 
-## 1. Prepare the Tailscale exit device
+## Before you start
 
-Create or sign in to a Tailnet, install Tailscale on the exit device, and sign
-in with the same Tailnet account.
+You need:
+
+- a Debian or Ubuntu server with root or sudo access;
+- AmneziaWG 2 installed on that server;
+- one Amnezia client profile for testing;
+- another computer or server in the desired exit location;
+- a Tailscale account.
+
+## 1. Install Amnezia normally
+
+Use the AmneziaVPN application on your computer:
+
+1. Select **Self-hosted VPN**.
+2. Enter the server IP address, SSH login, and password or SSH key.
+3. Choose the automatic installation or install AmneziaWG manually.
+4. Create at least one client profile and confirm that it connects.
+
+Amnezia installs Docker and its VPN container on the server automatically.
+VPN Router uses that existing container; it does not replace or reinstall
+Amnezia. See the official [Amnezia self-hosted installation
+guide](https://docs.amnezia.org/documentation/instructions/install-vpn-on-server/).
+
+## 2. Prepare the exit device
+
+Install Tailscale on the computer or server whose public internet address you
+want selected domains to use. Sign in to your Tailnet.
 
 On macOS or Windows, open the Tailscale menu and select **Exit node** then
-**Run exit node**. Prevent the device from sleeping while it is expected to
-carry traffic.
+**Run exit node**. Keep the device powered on and prevent it from sleeping.
 
-On Linux, install and sign in to Tailscale, enable forwarding, and advertise
-the node:
+On Linux, install and sign in to Tailscale first. Then enable forwarding and
+advertise the exit node:
 
 ```sh
 printf '%s\n' \
@@ -41,37 +64,41 @@ sudo tailscale set --advertise-exit-node
 sudo tailscale up
 ```
 
-Open the Tailscale [Machines page](https://login.tailscale.com/admin/machines),
-find the device, open **Edit route settings**, and enable **Use as exit node**.
-Record its Tailscale device name or `100.x.y.z` address. If the Tailnet has a
-custom access policy, it must allow the VPN Router node to reach
+The official [Tailscale exit-node
+guide](https://tailscale.com/docs/features/exit-nodes) provides current install
+instructions and platform-specific details.
+
+Then open the Tailscale [Machines page](https://login.tailscale.com/admin/machines):
+
+1. Find the exit device.
+2. Open **Edit route settings**.
+3. Enable **Use as exit node**.
+4. Copy its Tailscale name or `100.x.y.z` address.
+
+If you use a custom Tailnet access policy, it must permit
 `autogroup:internet`.
 
-The authoritative and platform-specific instructions are in the official
-[Tailscale exit-node guide](https://tailscale.com/docs/features/exit-nodes).
+## 3. Create a one-off Tailscale key
 
-## 2. Create a one-off key for VPN Router
+VPN Router needs to add its isolated container to the same Tailnet once.
 
-Open the Tailscale [Keys page](https://login.tailscale.com/admin/settings/keys)
-and select **Generate auth key**.
+Open the Tailscale [Keys page](https://login.tailscale.com/admin/settings/keys),
+select **Generate auth key**, and use:
 
-Use these settings for the first installation:
+- **One-off:** enabled;
+- **Reusable:** disabled;
+- **Ephemeral:** disabled;
+- **Pre-approved:** enabled if device approval is active;
+- a short expiry period.
 
-- one-off, not reusable;
-- not ephemeral, because VPN Router preserves this node across restarts;
-- pre-approved if device approval is enabled;
-- a short expiry period;
-- an optional server tag if the Tailnet policy already defines one.
+Copy the key, but do not save it in the VPN Router configuration or send it in
+chat. It is removed from the container after the first successful enrollment.
+Tailscale documents these choices in its [auth-key
+guide](https://tailscale.com/docs/features/access-control/auth-keys).
 
-Copy the key once. Do not paste it into a configuration file, issue, commit, or
-chat. VPN Router uses it only for first enrollment and then recreates the
-container without the key. See the official [auth-key
-guide](https://tailscale.com/docs/features/access-control/auth-keys) and
-[secure handling guide](https://tailscale.com/docs/features/access-control/auth-keys/how-to/secure-auth-keys).
+## 4. Install VPN Router
 
-## 3. Install VPN Router
-
-Run on the VPN server:
+Connect to the VPN server over SSH and run:
 
 ```sh
 git clone https://github.com/zabarov/vpn-router.git
@@ -79,55 +106,39 @@ cd vpn-router
 sudo ./install.sh install --install-dependencies
 ```
 
-Connect the test client to Amnezia, then inspect the detected server topology:
+The installer does not change or restart Amnezia.
+
+## 5. Run the setup wizard
+
+Keep the test Amnezia client profile available, then run:
 
 ```sh
-sudo vpn-router discover
+sudo vpn-router setup
 ```
 
-Discovery is read-only. It reports container, interface, VPN subnet, and the
-number of configured client `/32` addresses. It never prints VPN peer keys.
+The wizard automatically finds the Amnezia container, VPN interface, client
+subnet, and one test client. It asks only for:
 
-## 4. Create the canary configuration
+1. the Tailscale exit-node name or address from step 2;
+2. the domain suffixes that should use that exit.
 
-The beginner preset discovers a unique Amnezia container and uses one real
-client `/32` as the initial canary:
+The default suffixes are `.ru`, `.xn--p1ai`, and `.su`. This is only a domain
+list, not a complete country database. Add services on other suffixes
+explicitly when needed.
 
-```sh
-sudo vpn-router configure \
-  --preset amnezia-tailscale \
-  --output /etc/vpn-router/router.yaml
-```
+The wizard creates `/etc/vpn-router/router.yaml` with private file permissions.
+It does not enable routing yet.
 
-At the prompt, enter the exit-node device name or its Tailscale IP. Review the
-domain suffixes. `.ru`, `.xn--p1ai`, and `.su` are examples, not a complete
-country database. Services on `.com`, `.net`, direct IP addresses, or shared
-CDNs need deliberate entries and can have shared-IP effects.
+## 6. Check and enable safely
 
-If discovery finds multiple sources, repeat the command with the container and
-interface shown by `discover`:
-
-```sh
-sudo vpn-router configure \
-  --preset amnezia-tailscale \
-  --source-container amnezia-awg \
-  --source-interface awg0 \
-  --client-addresses 10.8.1.2/32 \
-  --output /etc/vpn-router/router.yaml
-```
-
-Replace every example topology value in the second command.
-
-## 5. Run the safe diagnostic and enable
-
-Read the key without putting it in shell history:
+Read the one-off key without placing it in shell history:
 
 ```sh
 IFS= read -r -s VPN_ROUTER_TAILSCALE_AUTH_KEY
 export VPN_ROUTER_TAILSCALE_AUTH_KEY
 ```
 
-Paste the key, press Enter, then run:
+Paste the key, press Enter, and run:
 
 ```sh
 sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY vpn-router doctor
@@ -136,86 +147,98 @@ sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
 unset VPN_ROUTER_TAILSCALE_AUTH_KEY
 ```
 
-`doctor` changes no routing. `enable` starts with a ten-minute server-side
-deadman. If setup fails, VPN Router attempts immediate cleanup and the deadman
-remains the independent safety net.
+`doctor` changes no routing. `enable` starts a ten-minute automatic rollback
+timer. VPN Router downloads and starts its own Tailscale container during this
+step; no Tailscale package is installed on the server.
 
-## 6. Test from the canary client
+## 7. Test one client
 
-Use system DNS on the client. Disable browser Secure DNS/DoH for this test.
-Then confirm:
+Connect the selected test profile through Amnezia and confirm:
 
-1. an ordinary domain shows the Amnezia server's normal public address;
-2. a selected domain shows the exit device's public address;
-3. both types resolve and load;
-4. another VPN client is unchanged.
+- a normal domain uses the VPN server's usual public address;
+- a selected domain uses the Tailscale exit device's public address;
+- another VPN client is unchanged.
 
-Inspect the server without cancelling the timer:
+Use system DNS during this test and disable browser Secure DNS or DoH.
 
-```sh
-sudo vpn-router status
-sudo vpn-router verify
-```
-
-Only after the external checks pass, cancel the deadman:
+If the result is correct, cancel the rollback timer:
 
 ```sh
 sudo vpn-router verify --cancel-deadman
 ```
 
-If anything is wrong, use the routing switch. Amnezia itself stays running:
+If anything is wrong, turn routing off. Amnezia remains online:
 
 ```sh
 sudo vpn-router disable
 ```
 
-## 7. Expand to every VPN user
+## 8. Apply the policy to every VPN user
 
-First disable routing and obtain the exact `client_subnet` from
-`sudo vpn-router discover --json`. Then recreate the configuration with an
-explicit subnet. This example is intentionally not copy-ready until its values
-are replaced:
+Only do this after the one-client test passes:
 
 ```sh
 sudo vpn-router disable
-sudo vpn-router configure \
-  --non-interactive \
-  --force \
-  --preset amnezia-tailscale \
-  --source-container amnezia-awg \
-  --source-interface awg0 \
-  --client-scope subnet \
-  --client-subnet 10.8.1.0/24 \
-  --exit-node exit-node.example.ts.net \
-  --output /etc/vpn-router/router.yaml
+sudo vpn-router setup --all-clients --force
 sudo vpn-router doctor
 sudo vpn-router enable --rollback-after 600
 ```
 
-Existing Tailscale enrollment is reused, so the auth key is not needed again.
-Repeat the full client test matrix before cancelling the new deadman. Only then
-enable automatic boot reconciliation:
+The wizard discovers the complete Amnezia client subnet. It asks for the exit
+node and domains again so the wider policy cannot be enabled accidentally.
+The existing Tailscale enrollment is reused; no auth key is needed.
+
+Test at least two VPN clients, then run:
 
 ```sh
 sudo vpn-router verify --cancel-deadman
 sudo vpn-router service-enable
 ```
 
-From this point, every address in that VPN subnet receives the same domain
-policy. The operational switch remains:
+## Everyday controls
+
+Turn domain routing off without disconnecting Amnezia users:
 
 ```sh
 sudo vpn-router disable
-sudo vpn-router enable --rollback-after 600
 ```
 
-## Limits that users need to know
+Turn it on again with an automatic rollback timer:
 
-- The guaranteed pre-alpha mode is IPv4/TCP with managed system DNS.
-- Selected UDP and QUIC are rejected so applications can fall back to TCP.
+```sh
+sudo vpn-router enable --rollback-after 600
+sudo vpn-router verify --cancel-deadman
+```
+
+View status:
+
+```sh
+sudo vpn-router status
+```
+
+## What is automatic
+
+VPN Router automatically:
+
+- finds the server container installed by Amnezia;
+- selects one test client for the first rollout;
+- creates the DNS and routing configuration;
+- downloads and starts an isolated Tailscale client container;
+- preserves its Tailscale enrollment across restarts;
+- blocks selected traffic instead of leaking it if the exit is unavailable;
+- provides a server-side rollback timer and an on/off switch.
+
+You perform only three external actions manually:
+
+1. install Amnezia through the Amnezia application;
+2. install Tailscale on the exit device and approve it as an exit node;
+3. create a one-off Tailscale key for first enrollment.
+
+## Current limits
+
+- The guaranteed mode is IPv4/TCP with managed system DNS.
+- Selected UDP and QUIC are rejected so applications can retry over TCP.
 - IPv6, browser DoH/DoT, ECH, and direct-IP connections are outside the strict
   guarantee.
-- If the exit device is asleep or offline, selected traffic is blocked instead
-  of leaking through the normal Amnezia exit. Other traffic remains direct.
-- A home computer can be an exit device for a small installation. A dedicated
-  Linux server is more suitable for continuous or multi-user traffic.
+- If the exit device sleeps or goes offline, selected traffic is blocked;
+  ordinary traffic continues through the normal Amnezia server exit.

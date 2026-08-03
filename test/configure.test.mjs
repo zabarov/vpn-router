@@ -9,6 +9,8 @@ import { validateConfig } from '../src/config-validator.mjs';
 import { applyPreset, parseArgs } from '../bin/vpn-router-configure.mjs';
 
 const configurePath = new URL('../bin/vpn-router-configure.mjs', import.meta.url);
+const commandPath = new URL('../scripts/vpn-router-command.sh', import.meta.url);
+const configureSource = await readFile(configurePath, 'utf8');
 
 test('non-interactive wizard creates a private validated Tailscale canary config', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'vpn-router-configure-'));
@@ -156,4 +158,47 @@ test('amnezia-tailscale preset permits an explicit subnet only after canary roll
   });
   assert.equal(configured.clientScope, 'subnet');
   assert.equal(configured.clientSubnet, '10.8.1.0/24');
+});
+
+test('all-clients shortcut uses the subnet discovered from Amnezia', async () => {
+  const values = parseArgs(['--preset', 'amnezia-tailscale', '--all-clients', '--exit-node', 'exit.example.ts.net']);
+  const configured = await applyPreset(values, async () => [{
+    container_name: 'amnezia-awg',
+    interface: 'awg0',
+    client_subnet: '10.77.0.0/24',
+    client_addresses: []
+  }]);
+  assert.equal(configured.clientScope, 'subnet');
+  assert.equal(configured.clientSubnet, '10.77.0.0/24');
+});
+
+test('setup shortcut creates an Amnezia and Tailscale config through the guarded preset', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vpn-router-setup-'));
+  const output = join(directory, 'router.yaml');
+  try {
+    const result = spawnSync(commandPath.pathname, [
+      'setup', '--non-interactive', '--output', output,
+      '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+      '--client-addresses', '10.8.1.7/32',
+      '--exit-node', 'exit.example.ts.net',
+      '--domains', '.ru,.xn--p1ai,.su,.example'
+    ], {
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const config = parse(await readFile(output, 'utf8'));
+    assert.equal(config.egresses[0].exit_node, 'exit.example.ts.net');
+    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.ru', '.xn--p1ai', '.su', '.example']);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('interactive beginner preset asks only user-owned routing choices', () => {
+  const start = configureSource.indexOf('async function collectPresetInteractive');
+  const end = configureSource.indexOf('function commaList', start);
+  const presetWizard = configureSource.slice(start, end);
+  assert.match(presetWizard, /Tailscale exit node name or IP/);
+  assert.match(presetWizard, /Domain suffixes routed through Tailscale/);
+  assert.doesNotMatch(presetWizard, /VPN source type|Owned nftables table|Service name/);
 });

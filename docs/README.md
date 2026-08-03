@@ -2,12 +2,17 @@
 
 ## User and operator guides
 
+- [Start here: simple Amnezia and Tailscale setup](operations/tailscale-quickstart.md)
 - [Installation and lifecycle](operations/installation.md)
 - [Troubleshooting](operations/troubleshooting.md)
 - [Live validation gate](operations/live-validation.md)
 - [Sanitized pre-alpha validation report](operations/validation-report.md)
 - [AmneziaWG2 adapter](operations/amneziawg2-sidecar.md)
 - [Deployment ownership and rollback contract](operations/deployment-contract.md)
+
+The quick start is for a server owner who installed Amnezia through its normal
+desktop application. The installation guide is the advanced path for other VPN
+and egress adapters.
 
 ## Developer guides
 

@@ -26,6 +26,7 @@ const defaults = {
   serviceName: 'vpn-router',
   nftablesTable: 'vpn_router',
   preset: null,
+  allClients: false,
   force: false,
   nonInteractive: false,
   provided: new Set()
@@ -59,6 +60,7 @@ provide topology values explicitly.
 
 Options:
   --preset <amnezia-tailscale>
+  --all-clients (use the discovered VPN subnet; preset only)
   --output <path>
   --source-type <amneziawg2_container|linux_interface>
   --source-container <name>
@@ -89,6 +91,12 @@ export function parseArgs(argv) {
     }
     if (argument === '--non-interactive') {
       values.nonInteractive = true;
+      continue;
+    }
+    if (argument === '--all-clients') {
+      values.allClients = true;
+      values.clientScope = 'subnet';
+      values.provided.add('clientScope');
       continue;
     }
     if (argument === '-h' || argument === '--help') {
@@ -125,7 +133,7 @@ export async function applyPreset(values, discover = discoverAmneziaSources) {
     values.sourceContainer = candidate.container_name;
     values.sourceInterface = candidate.interface;
     if (!values.provided.has('clientSubnet')) values.clientSubnet = candidate.client_subnet;
-    if (!values.provided.has('clientAddresses')) {
+    if (values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
       if (candidate.client_addresses.length === 0) {
         throw new Error('No configured VPN client /32 was discovered. Add one test client or pass --client-addresses explicitly.');
       }
@@ -184,6 +192,25 @@ async function collectInteractive(values) {
     values.domains = await ask(rl, 'Strict domain suffixes, comma separated', values.domains);
     values.serviceName = await ask(rl, 'Service name', values.serviceName);
     values.nftablesTable = await ask(rl, 'Owned nftables table', values.nftablesTable);
+  } finally {
+    rl.close();
+  }
+  return values;
+}
+
+async function collectPresetInteractive(values) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    process.stdout.write('Amnezia VPN source detected.\n');
+    process.stdout.write(`  container: ${values.sourceContainer}\n`);
+    process.stdout.write(`  interface: ${values.sourceInterface}\n`);
+    if (values.clientScope === 'subnet') {
+      process.stdout.write(`  clients: ${values.clientSubnet} (all VPN clients)\n\n`);
+    } else {
+      process.stdout.write(`  test client: ${values.clientAddresses}\n\n`);
+    }
+    values.exitNode = await askRequired(rl, 'Tailscale exit node name or IP', values.exitNode);
+    values.domains = await ask(rl, 'Domain suffixes routed through Tailscale', values.domains);
   } finally {
     rl.close();
   }
@@ -285,7 +312,9 @@ async function writeExclusive(path, content, force) {
 async function main() {
   let values = parseArgs(process.argv.slice(2));
   values = await applyPreset(values);
-  if (!values.nonInteractive) values = await collectInteractive(values);
+  if (!values.nonInteractive) {
+    values = values.preset ? await collectPresetInteractive(values) : await collectInteractive(values);
+  }
   const config = buildConfig(values);
   const result = validateConfig(config);
   if (!result.valid) throw new Error(`Configuration is invalid:\n- ${result.errors.join('\n- ')}`);
