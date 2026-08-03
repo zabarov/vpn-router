@@ -11,10 +11,13 @@ const serviceNamePattern = /^[a-z][a-z0-9-]{2,63}$/;
 const rootFields = new Set(['schema_version', 'sources', 'capture', 'egresses', 'policies', 'destination_sets', 'traffic_handling', 'resources']);
 const captureFields = new Set(['type', 'listen_port']);
 const destinationSetFields = new Set(['ip_cidrs', 'domain_suffixes']);
-const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet']);
-const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet']);
+const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet', 'client_scope']);
+const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet', 'client_scope']);
+const clientScopeFields = new Set(['mode', 'addresses', 'subnet']);
 const directEgressFields = new Set(['tag', 'type']);
 const tailscaleEgressFields = new Set(['tag', 'type', 'auth_key_env', 'exit_node', 'proxy_server', 'proxy_port', 'healthcheck_url']);
+const socksEgressFields = new Set(['tag', 'type', 'server', 'port', 'healthcheck_url']);
+const interfaceEgressFields = new Set(['tag', 'type', 'interface', 'healthcheck_url']);
 const policyFields = new Set(['tag', 'source', 'destination_sets', 'egress', 'failure_mode']);
 const trafficHandlingFields = new Set(['udp_quic', 'ipv6', 'dns_mode']);
 const resourceFields = new Set(['nftables_table', 'service_name']);
@@ -61,6 +64,49 @@ function validIpv4Cidr(value) {
 
 function isSingleHostIpv4Cidr(value) {
   return validIpv4Cidr(value) && value.endsWith('/32');
+}
+
+function isCanonicalIpv4Subnet(value) {
+  if (!validIpv4Cidr(value)) return false;
+  const [address, prefixText] = value.split('/');
+  const prefix = Number(prefixText);
+  const numeric = address.split('.').reduce((result, octet) => ((result << 8) | Number(octet)) >>> 0, 0);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (numeric & mask) === numeric;
+}
+
+function validateClientScope(source, errors) {
+  const label = `source ${source.tag ?? '<unknown>'}`;
+  const hasLegacyScope = source.client_subnet !== undefined;
+  const hasClientScope = source.client_scope !== undefined;
+  if (hasLegacyScope === hasClientScope) {
+    errors.push(`${label} must declare exactly one of client_scope or legacy client_subnet`);
+    return;
+  }
+  if (hasLegacyScope) {
+    if (!isSingleHostIpv4Cidr(source.client_subnet)) errors.push(`${label} legacy client_subnet must be one IPv4 host (/32)`);
+    return;
+  }
+  if (!isObject(source.client_scope)) {
+    errors.push(`${label} client_scope must be an object`);
+    return;
+  }
+  const scope = source.client_scope;
+  rejectUnknownKeys(scope, clientScopeFields, `${label} client_scope`, errors);
+  if (scope.mode === 'address_list') {
+    if (!Array.isArray(scope.addresses) || scope.addresses.length === 0 || scope.addresses.some((cidr) => !isSingleHostIpv4Cidr(cidr))) {
+      errors.push(`${label} address_list requires one or more IPv4 host (/32) addresses`);
+    }
+    rejectDuplicates(scope.addresses, `${label} client_scope.addresses`, errors);
+    if (scope.subnet !== undefined) errors.push(`${label} address_list cannot declare subnet`);
+    return;
+  }
+  if (scope.mode === 'subnet') {
+    if (!isCanonicalIpv4Subnet(scope.subnet) || scope.subnet === '0.0.0.0/0') errors.push(`${label} subnet requires a canonical, explicit IPv4 VPN CIDR and cannot use 0.0.0.0/0`);
+    if (scope.addresses !== undefined) errors.push(`${label} subnet cannot declare addresses`);
+    return;
+  }
+  errors.push(`${label} client_scope.mode must be address_list or subnet`);
 }
 
 function validDomainSuffix(value) {
@@ -136,14 +182,16 @@ export function validateConfig(config) {
       errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
     }
     if (!interfaceNamePattern.test(source.interface ?? '')) errors.push(`source ${source.tag ?? '<unknown>'} requires a valid Linux interface name`);
-    if (!isSingleHostIpv4Cidr(source.client_subnet)) errors.push(`source ${source.tag ?? '<unknown>'} client_subnet must be one IPv4 host (/32) in the MVP`);
+    validateClientScope(source, errors);
   }
 
   for (const egress of config.egresses) {
     if (!isObject(egress)) continue;
-    if (!['direct', 'tailscale_socks'].includes(egress.type)) errors.push(`egress ${egress.tag ?? '<unknown>'} has an unsupported type`);
+    if (!['direct', 'tailscale_socks', 'socks5', 'linux_interface'].includes(egress.type)) errors.push(`egress ${egress.tag ?? '<unknown>'} has an unsupported type`);
     if (egress.type === 'direct') rejectUnknownKeys(egress, directEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
     if (egress.type === 'tailscale_socks') rejectUnknownKeys(egress, tailscaleEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
+    if (egress.type === 'socks5') rejectUnknownKeys(egress, socksEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
+    if (egress.type === 'linux_interface') rejectUnknownKeys(egress, interfaceEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
     if (egress.type === 'tailscale_socks') {
       if (!environmentNamePattern.test(egress.auth_key_env ?? '')) errors.push(`Tailscale egress ${egress.tag} requires auth_key_env, not a credential value`);
       if (!networkAddressPattern.test(egress.exit_node ?? '')) errors.push(`Tailscale egress ${egress.tag} requires exit_node`);
@@ -151,11 +199,20 @@ export function validateConfig(config) {
       if (!Number.isInteger(egress.proxy_port) || egress.proxy_port < 1 || egress.proxy_port > 65535) errors.push(`Tailscale egress ${egress.tag} requires proxy_port`);
       if (!validHttpsUrl(egress.healthcheck_url)) errors.push(`Tailscale egress ${egress.tag} requires a credential-free HTTPS healthcheck_url`);
     }
+    if (egress.type === 'socks5') {
+      if (!networkAddressPattern.test(egress.server ?? '')) errors.push(`SOCKS5 egress ${egress.tag} requires server`);
+      if (!Number.isInteger(egress.port) || egress.port < 1 || egress.port > 65535) errors.push(`SOCKS5 egress ${egress.tag} requires port`);
+      if (!validHttpsUrl(egress.healthcheck_url)) errors.push(`SOCKS5 egress ${egress.tag} requires a credential-free HTTPS healthcheck_url`);
+    }
+    if (egress.type === 'linux_interface') {
+      if (!interfaceNamePattern.test(egress.interface ?? '')) errors.push(`Linux interface egress ${egress.tag} requires a valid interface name`);
+      if (!validHttpsUrl(egress.healthcheck_url)) errors.push(`Linux interface egress ${egress.tag} requires a credential-free HTTPS healthcheck_url`);
+    }
   }
   const directEgresses = config.egresses.filter((egress) => isObject(egress) && egress.type === 'direct');
-  const tailscaleEgresses = config.egresses.filter((egress) => isObject(egress) && egress.type === 'tailscale_socks');
-  if (directEgresses.length !== 1 || tailscaleEgresses.length !== 1) {
-    errors.push('the IPv4/TCP MVP requires exactly one direct and one tailscale_socks egress');
+  const strictEgresses = config.egresses.filter((egress) => isObject(egress) && ['tailscale_socks', 'socks5', 'linux_interface'].includes(egress.type));
+  if (directEgresses.length !== 1 || strictEgresses.length !== 1) {
+    errors.push('the IPv4/TCP MVP requires exactly one direct and one supported strict egress');
   }
 
   for (const policy of config.policies) {
@@ -187,7 +244,7 @@ export function validateConfig(config) {
   if (strictPolicy) {
     if (strictPolicy.destination_sets?.includes('default')) errors.push(`strict policy ${strictPolicy.tag ?? '<unknown>'} cannot target default`);
     const strictEgress = config.egresses.find((candidate) => candidate.tag === strictPolicy.egress);
-    if (strictEgress && strictEgress.type !== 'tailscale_socks') errors.push(`strict policy ${strictPolicy.tag ?? '<unknown>'} must use a tailscale_socks egress in the MVP`);
+    if (strictEgress && !['tailscale_socks', 'socks5', 'linux_interface'].includes(strictEgress.type)) errors.push(`strict policy ${strictPolicy.tag ?? '<unknown>'} must use a supported strict egress`);
   }
 
   const defaultPolicy = defaultPolicies[0];

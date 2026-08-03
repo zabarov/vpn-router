@@ -4,6 +4,17 @@ import test from 'node:test';
 
 const lifecyclePath = new URL('../scripts/vpn-router-lifecycle.sh', import.meta.url);
 
+test('exposes an idempotent routing switch without disabling the source VPN', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  assert.match(source, /vpn-router-lifecycle[.]sh enable --config/);
+  assert.match(source, /vpn-router-lifecycle[.]sh disable --config/);
+  assert.match(source, /enable\|apply\) apply_command/);
+  assert.match(source, /disable\|rollback\)/);
+  assert.match(source, /write_manifest "\$final_status"/);
+  assert.match(source, /disable=ALREADY_DISABLED/);
+  assert.doesNotMatch(source, /docker (?:stop|rm).*\$SOURCE_CONTAINER/);
+});
+
 test('managed apply fails immediately when a guarded runtime step fails', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   assert.match(source, /wait_for_tailscale \|\| return 1/);
@@ -23,6 +34,9 @@ test('status reports drift instead of trusting an applied manifest alone', async
   assert.match(status, /verify_internal/);
   assert.match(status, /nftables_table_present/);
   assert.match(status, /source_proxy_connected/);
+  assert.match(status, /client_scope_mode=\$CLIENT_SCOPE_MODE/);
+  assert.match(status, /client_scope_entries=/);
+  assert.match(status, /strict_egress_type=\$STRICT_EGRESS_TYPE/);
 });
 
 test('an active manifest must match both the stored and requested config', async () => {

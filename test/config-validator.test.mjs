@@ -55,10 +55,34 @@ test('rejects bypass behavior in a strict profile', () => {
   assert.match(validateConfig(config).errors.join('\n'), /must be reject/);
 });
 
-test('rejects a client pool instead of a single canary address', () => {
+test('accepts an explicit VPN client subnet', () => {
   const config = validConfig();
-  config.sources[0].client_subnet = '10.8.1.0/24';
-  assert.match(validateConfig(config).errors.join('\n'), /one IPv4 host \(\/32\)/);
+  delete config.sources[0].client_subnet;
+  config.sources[0].client_scope = { mode: 'subnet', subnet: '10.8.1.0/24' };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('accepts an explicit list of VPN clients', () => {
+  const config = validConfig();
+  delete config.sources[0].client_subnet;
+  config.sources[0].client_scope = { mode: 'address_list', addresses: ['10.8.1.2/32', '10.8.1.3/32'] };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('rejects ambiguous and all-addresses client scopes', () => {
+  const config = validConfig();
+  config.sources[0].client_scope = { mode: 'subnet', subnet: '0.0.0.0/0' };
+  const errors = validateConfig(config).errors.join('\n');
+  assert.match(errors, /exactly one of client_scope or legacy client_subnet/);
+  delete config.sources[0].client_subnet;
+  assert.match(validateConfig(config).errors.join('\n'), /cannot use 0\.0\.0\.0\/0/);
+});
+
+test('rejects a client subnet with host bits set', () => {
+  const config = validConfig();
+  delete config.sources[0].client_subnet;
+  config.sources[0].client_scope = { mode: 'subnet', subnet: '10.8.1.2/24' };
+  assert.match(validateConfig(config).errors.join('\n'), /requires a canonical/);
 });
 
 test('rejects IPv6 destination CIDRs in the IPv4 MVP', () => {
@@ -151,8 +175,20 @@ test('rejects unused extra egresses in the narrow MVP contract', () => {
   const config = validConfig();
   config.egresses.push({ tag: 'unused-direct', type: 'direct' });
   const errors = validateConfig(config).errors.join('\n');
-  assert.match(errors, /exactly one direct and one tailscale_socks egress/);
+  assert.match(errors, /exactly one direct and one supported strict egress/);
   assert.match(errors, /unused-direct is not referenced/);
+});
+
+test('accepts a provider-neutral SOCKS5 strict egress', () => {
+  const config = validConfig();
+  config.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'egress.example.net', port: 1080, healthcheck_url: 'https://example.com/' };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('accepts a provider-neutral Linux interface strict egress', () => {
+  const config = validConfig();
+  config.egresses[1] = { tag: 'regional-exit', type: 'linux_interface', interface: 'wg-exit', healthcheck_url: 'https://example.com/' };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 });
 
 test('rejects duplicate destination entries', () => {

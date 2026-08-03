@@ -64,24 +64,56 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["tag", "type", "container_name", "interface", "client_subnet"],
+          "required": ["tag", "type", "container_name", "interface"],
+          "oneOf": [
+            { "required": ["client_scope"], "properties": { "client_scope": true } },
+            { "required": ["client_subnet"], "properties": { "client_subnet": true } }
+          ],
           "properties": {
             "tag": { "$ref": "#/$defs/tag" },
             "type": { "const": "amneziawg2_container" },
             "container_name": { "type": "string", "minLength": 1 },
             "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
-            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" }
+            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" },
+            "client_scope": { "$ref": "#/$defs/clientScope" }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["tag", "type", "interface", "client_subnet"],
+          "required": ["tag", "type", "interface"],
+          "oneOf": [
+            { "required": ["client_scope"], "properties": { "client_scope": true } },
+            { "required": ["client_subnet"], "properties": { "client_subnet": true } }
+          ],
           "properties": {
             "tag": { "$ref": "#/$defs/tag" },
             "type": { "const": "linux_interface" },
             "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
-            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" }
+            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" },
+            "client_scope": { "$ref": "#/$defs/clientScope" }
+          }
+        }
+      ]
+    },
+    "clientScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "addresses"],
+          "properties": {
+            "mode": { "const": "address_list" },
+            "addresses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[0-9.]+/32$" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "subnet"],
+          "properties": {
+            "mode": { "const": "subnet" },
+            "subnet": { "type": "string", "pattern": "^[0-9.]+/(?:[0-9]|[12][0-9]|3[0-2])$" }
           }
         }
       ]
@@ -108,6 +140,29 @@
             "exit_node": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,252}$" },
             "proxy_server": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,252}$" },
             "proxy_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "healthcheck_url": { "type": "string", "pattern": "^https://\\S+$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tag", "type", "server", "port", "healthcheck_url"],
+          "properties": {
+            "tag": { "$ref": "#/$defs/tag" },
+            "type": { "const": "socks5" },
+            "server": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,252}$" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "healthcheck_url": { "type": "string", "pattern": "^https://\\S+$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tag", "type", "interface", "healthcheck_url"],
+          "properties": {
+            "tag": { "$ref": "#/$defs/tag" },
+            "type": { "const": "linux_interface" },
+            "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
             "healthcheck_url": { "type": "string", "pattern": "^https://\\S+$" }
           }
         }

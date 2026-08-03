@@ -27,7 +27,7 @@ services:
   vpn-router-dns:
     build:
       context: ./dnsmasq
-    image: vpn-router-dns:0.2.0-pre-alpha
+    image: vpn-router-dns:0.3.0-pre-alpha
     container_name: ${VPN_ROUTER_DNS_SERVICE_NAME:-vpn-router-dns}
     network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
     restart: unless-stopped
@@ -43,7 +43,7 @@ services:
       - ${VPN_ROUTER_DNSMASQ_CONFIG:?Set VPN_ROUTER_DNSMASQ_CONFIG}:/etc/dnsmasq.conf:ro
 
   vpn-router:
-    image: ghcr.io/sagernet/sing-box:v1.13.12@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
+    image: ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
     container_name: ${VPN_ROUTER_SERVICE_NAME:-vpn-router}
     network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
     restart: unless-stopped

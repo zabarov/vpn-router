@@ -5,8 +5,10 @@ sources:
     type: amneziawg2_container
     container_name: amnezia-awg2
     interface: awg0
-    # The pre-alpha runtime deliberately accepts one canary client only.
-    client_subnet: 10.8.1.2/32
+    # Use address_list for a staged rollout or subnet for the whole VPN pool.
+    client_scope:
+      mode: subnet
+      subnet: 10.8.1.0/24
 
 capture:
   type: redirect

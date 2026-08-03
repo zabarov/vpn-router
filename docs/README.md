@@ -12,6 +12,8 @@
 
 - [Architecture](developer/architecture.md)
 - [Configuration reference](developer/configuration.md)
+- [Production contract](developer/production-contract.md)
+- [Production readiness](developer/production-readiness.md)
 
 ## Repository contract
 

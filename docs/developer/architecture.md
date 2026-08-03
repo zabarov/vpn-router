@@ -21,7 +21,7 @@ changing its default route.
 
 ```text
 Amnezia namespace
-  canary /32 -> awg0
+  explicit client list or VPN subnet -> awg0
     |-- DNS :53 -> dnsmasq :5353 -> persistent nftables DNS set
     |-- selected TCP -> nftables REDIRECT -> sing-box
     |-- selected UDP / UDP 443 -> reject
@@ -55,8 +55,9 @@ explicitly re-resolve the domains used for acceptance through managed DNS.
 Previously cached answers cannot be reconstructed from suffixes alone.
 
 Every generated DNS redirect, TCP redirect, forward guard, UDP, and QUIC rule
-matches both the source interface and `source.client_subnet`. The pre-alpha
-validator requires that subnet to be one `/32`.
+matches both the source interface and a project-owned nftables client set. The
+set contains either the explicit `/32` rollout list or the configured VPN
+subnet. A wildcard interface-only scope is forbidden.
 
 For every selected TCP set, the generator emits two complementary rules:
 
@@ -76,7 +77,7 @@ into an accidental block or fallback decision.
 
 ## Protocol boundary
 
-Version `0.2.0-pre-alpha` supports IPv4/TCP only. Selected UDP is rejected and
+Version `0.3.0-pre-alpha` supports IPv4/TCP only. Selected UDP is rejected and
 UDP/443 is rejected for the canary so clients can retry over TCP. A global IPv6
 address on the source interface makes managed preflight fail. IPv6 requires a
 future source identity and routing design that can preserve the `/32` isolation
@@ -89,7 +90,8 @@ plus its declared nftables table. Before any apply, the lifecycle captures
 root-only Docker, address, route, rule, and nftables evidence. It refuses a
 name or table collision without an existing project manifest.
 
-`apply` is transactional and arms a systemd rollback deadman. `rollback`
+`enable` is transactional and arms a systemd rollback deadman. `disable` is the
+normal routing switch; `rollback`
 removes only manifest-owned sidecars, networks, and table. It does not modify
 the AmneziaWG2 container, its routes, or the persisted Tailscale state.
 

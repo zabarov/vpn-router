@@ -75,6 +75,7 @@ docker compose -f "$compose_file" up -d --wait
 sidecar_id=$(docker compose -f "$compose_file" ps -q sidecar)
 
 assert_response canary-client 172.30.20.30 direct-target
+assert_response selected-client 172.30.20.30 direct-target
 assert_response control-client 172.30.20.20 strict-target
 
 docker compose -f "$compose_file" stop socks-egress >/dev/null
@@ -82,12 +83,15 @@ resolve_strict
 docker compose -f "$compose_file" exec -T source \
   nft get element inet vpn_router_lab set_strict_target_dns '{ 172.30.20.20 }' >/dev/null
 assert_blocked canary-client 172.30.20.20
+assert_blocked selected-client 172.30.20.20
 assert_response canary-client 172.30.20.30 direct-target
+assert_response selected-client 172.30.20.30 direct-target
 assert_response control-client 172.30.20.20 strict-target
 
 docker compose -f "$compose_file" start socks-egress >/dev/null
 sleep 2
 assert_response canary-client 172.30.20.20 strict-target
+assert_response selected-client 172.30.20.20 strict-target
 if [ "$(docker compose -f "$compose_file" ps -q sidecar)" != "$sidecar_id" ]; then
   echo "FAIL: strict recovery restarted the redirect sidecar instead of re-resolving the SOCKS service" >&2
   exit 1
@@ -101,6 +105,7 @@ assert_response canary-client 172.30.20.20 strict-target
 
 docker compose -f "$compose_file" stop sidecar >/dev/null
 assert_blocked canary-client 172.30.20.20
+assert_blocked selected-client 172.30.20.20
 assert_response canary-client 172.30.20.30 direct-target
 assert_response control-client 172.30.20.20 strict-target
 
@@ -116,4 +121,4 @@ if docker network inspect "${project_name}_lab" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "PASS: managed DNS selected the first connection, /32 strict traffic required TCP redirect and SOCKS, a stopped SOCKS name failed closed and recovered without restarting sing-box, both outages preserved direct traffic, selected addresses persisted after managed DNS stopped, the second client was unaffected, and cleanup completed."
+echo "PASS: managed DNS selected the first connection, two selected clients required TCP redirect and SOCKS, a stopped SOCKS name failed closed and recovered without restarting sing-box, both outages preserved direct traffic, selected addresses persisted after managed DNS stopped, an excluded control client was unaffected, and cleanup completed."

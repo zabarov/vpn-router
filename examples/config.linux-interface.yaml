@@ -1,0 +1,48 @@
+schema_version: "1.0"
+
+sources:
+  - tag: vpn-in
+    type: linux_interface
+    interface: tun0
+    client_scope:
+      mode: address_list
+      addresses:
+        - 10.30.0.2/32
+        - 10.30.0.3/32
+
+capture:
+  type: redirect
+  listen_port: 12345
+
+egresses:
+  - tag: direct
+    type: direct
+  - tag: tunnel-exit
+    type: linux_interface
+    interface: wg-exit
+    healthcheck_url: https://example.com/
+
+policies:
+  - tag: selected-services
+    source: vpn-in
+    destination_sets: [selected-services]
+    egress: tunnel-exit
+    failure_mode: block
+  - tag: default-direct
+    source: vpn-in
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  selected-services:
+    ip_cidrs: [192.0.2.0/24]
+
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+
+resources:
+  nftables_table: vpn_router
+  service_name: vpn-router

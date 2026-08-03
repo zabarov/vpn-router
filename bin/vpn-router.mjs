@@ -7,6 +7,7 @@ import { validateConfig } from '../src/config-validator.mjs';
 import { generateSingBoxConfig } from '../src/sing-box-generator.mjs';
 import { generateNftablesConfig } from '../src/nftables-generator.mjs';
 import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
+import { sourceClientScope } from '../src/config-normalizer.mjs';
 
 function usage() {
   return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq|render-runtime-env> --config <path>';
@@ -51,17 +52,24 @@ async function main(argv) {
     const source = config.sources[0];
     const strictPolicy = config.policies.find((policy) => policy.failure_mode === 'block');
     const strictEgress = config.egresses.find((egress) => egress.tag === strictPolicy.egress);
+    const clientScope = sourceClientScope(source);
     const fields = {
       SOURCE_TYPE: source.type,
       SOURCE_CONTAINER: source.container_name ?? 'none',
       SOURCE_INTERFACE: source.interface,
-      CLIENT_SUBNET: source.client_subnet,
+      CLIENT_SCOPE_MODE: clientScope.mode,
+      CLIENT_SCOPE_CIDRS: clientScope.cidrs.join(','),
       STRICT_EGRESS_TAG: strictEgress.tag,
-      TAILSCALE_AUTH_KEY_ENV: strictEgress.auth_key_env,
-      TAILSCALE_EXIT_NODE: strictEgress.exit_node,
-      TAILSCALE_PROXY_SERVER: strictEgress.proxy_server,
-      TAILSCALE_PROXY_PORT: strictEgress.proxy_port,
-      TAILSCALE_HEALTHCHECK_URL: strictEgress.healthcheck_url,
+      STRICT_EGRESS_TYPE: strictEgress.type,
+      STRICT_EGRESS_SERVER: strictEgress.proxy_server ?? strictEgress.server ?? 'none',
+      STRICT_EGRESS_PORT: strictEgress.proxy_port ?? strictEgress.port ?? 'none',
+      STRICT_EGRESS_INTERFACE: strictEgress.interface ?? 'none',
+      STRICT_EGRESS_HEALTHCHECK_URL: strictEgress.healthcheck_url,
+      TAILSCALE_AUTH_KEY_ENV: strictEgress.auth_key_env ?? 'none',
+      TAILSCALE_EXIT_NODE: strictEgress.exit_node ?? 'none',
+      TAILSCALE_PROXY_SERVER: strictEgress.proxy_server ?? 'none',
+      TAILSCALE_PROXY_PORT: strictEgress.proxy_port ?? 'none',
+      TAILSCALE_HEALTHCHECK_URL: strictEgress.type === 'tailscale_socks' ? strictEgress.healthcheck_url : 'none',
       NFTABLES_TABLE: config.resources.nftables_table,
       SERVICE_NAME: config.resources.service_name
     };

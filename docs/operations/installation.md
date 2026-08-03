@@ -10,7 +10,7 @@ The managed AmneziaWG2 adapter requires:
 - an existing, healthy AmneziaWG2 container and `awg0` interface;
 - `/dev/net/tun` for an isolated client test;
 - a Tailscale exit node that is online and allowed by Tailnet policy;
-- a unique test-client IPv4 address expressed as `/32`.
+- a unique test-client IPv4 address expressed as an `address_list` `/32`.
 
 Do not use the operator's own workstation as the first test client.
 
@@ -62,7 +62,7 @@ the runner exits.
 Copy `config.example.yaml` outside Git. Set:
 
 - the real Amnezia container and interface names;
-- the test client's single `/32` address;
+- one canary `/32` in `client_scope.addresses` for the first enable;
 - a unique `resources.service_name` and nftables table;
 - the Tailscale exit-node full hostname or IP;
 - `proxy_server` to `<service_name>-egress`.
@@ -90,11 +90,11 @@ sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
   ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
 ```
 
-Apply always requires a server-side rollback timeout:
+Enable always requires a server-side rollback timeout:
 
 ```sh
 sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
-  ./scripts/vpn-router-lifecycle.sh apply \
+  ./scripts/vpn-router-lifecycle.sh enable \
   --config ./router.yaml \
   --rollback-after 600
 ```
@@ -119,15 +119,16 @@ sudo ./scripts/vpn-router-lifecycle.sh verify \
   --cancel-deadman
 ```
 
-Rollback is idempotent:
+Disable is the normal idempotent routing switch:
 
 ```sh
-sudo ./scripts/vpn-router-lifecycle.sh rollback --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh disable --config ./router.yaml
 ```
 
 It preserves the Tailscale state directory and the existing AmneziaWG2
 container. A recreated source container invalidates verification; re-run
-preflight and apply after confirming the new namespace.
+preflight and enable after confirming the new namespace. Use `rollback` for
+failure recovery; `apply` remains an alias for `enable`.
 
 While a manifest is active, all lifecycle commands require the exact config
 revision recorded at apply time. If the operator copy changed, use the
@@ -135,7 +136,8 @@ root-only `/var/lib/<service_name>/runtime/config.yaml` to verify or roll back.
 
 ## Current deployment boundary
 
-`linux_interface` is fully supported by validation and artifact generation, but
+`linux_interface` sources and `socks5`/`linux_interface` strict egresses are
+supported by validation and artifact generation, but
 the bundled managed lifecycle does not yet install host-network processes for
 that adapter. Treat a generic-interface deployment as an operator-owned runtime
 until a separate lifecycle adapter is released and proven.

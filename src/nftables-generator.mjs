@@ -1,4 +1,5 @@
 import { validateConfig } from './config-validator.mjs';
+import { sourceClientScope, sourceClientSetName } from './config-normalizer.mjs';
 
 function setName(tag) {
   return `set_${tag.replaceAll('-', '_')}`;
@@ -13,7 +14,7 @@ function dnsSetName(tag) {
 }
 
 function packetSelector(source, destinationSet) {
-  return `iifname "${source.interface}" ip saddr ${source.client_subnet} ip daddr @${destinationSet}`;
+  return `iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} ip daddr @${destinationSet}`;
 }
 
 export function generateNftablesConfig(config) {
@@ -26,6 +27,10 @@ export function generateNftablesConfig(config) {
     .filter((name, index, all) => all.indexOf(name) === index);
 
   const lines = [`table inet ${config.resources.nftables_table} {`];
+  for (const source of config.sources) {
+    const scope = sourceClientScope(source);
+    lines.push(`  set ${sourceClientSetName(source)} { type ipv4_addr; flags interval; elements = { ${scope.cidrs.join(', ')} } }`);
+  }
   for (const name of sets) {
     const cidrs = config.destination_sets[name].ip_cidrs ?? [];
     const suffixes = config.destination_sets[name].domain_suffixes ?? [];
@@ -53,8 +58,8 @@ export function generateNftablesConfig(config) {
   if (hasStrictDomains && config.traffic_handling.dns_mode === 'managed') {
     for (const policy of strictPolicies) {
       const source = config.sources.find((candidate) => candidate.tag === policy.source);
-      lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} udp dport 53 counter redirect to :5353`);
-      lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} tcp dport 53 counter redirect to :5353`);
+      lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} udp dport 53 counter redirect to :5353`);
+      lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} tcp dport 53 counter redirect to :5353`);
     }
   }
   for (const { selector } of strictSelectors) {
@@ -69,7 +74,7 @@ export function generateNftablesConfig(config) {
   }
   for (const policy of strictPolicies) {
     const source = config.sources.find((candidate) => candidate.tag === policy.source);
-    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} udp dport 443 counter reject`);
+    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} udp dport 443 counter reject`);
   }
   lines.push('  }');
 

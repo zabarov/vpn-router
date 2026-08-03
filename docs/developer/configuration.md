@@ -6,10 +6,10 @@ validator adds semantic safety rules that JSON Schema cannot express compactly.
 
 ## Pre-alpha shape
 
-`0.2.0-pre-alpha` requires:
+The current pre-alpha contract requires:
 
 - exactly one active source;
-- exactly one direct and one `tailscale_socks` egress, both referenced;
+- exactly one direct and one supported strict egress, both referenced;
 - exactly one strict policy with `failure_mode: block`;
 - exactly one default policy with `destination_sets: [default]`, a direct
   egress, and `failure_mode: direct`;
@@ -17,8 +17,8 @@ validator adds semantic safety rules that JSON Schema cannot express compactly.
 - `traffic_handling.udp_quic: reject` and `traffic_handling.ipv6: reject`;
 - managed DNS whenever the strict policy contains domain suffixes.
 
-Non-default `failure_mode: direct`, multiple strict regions, full client pools,
-IPv6 CIDRs, and alternate protocol behavior are rejected instead of being
+Non-default `failure_mode: direct`, multiple strict regions, IPv6 CIDRs, and
+alternate protocol behavior are rejected instead of being
 partially implemented.
 
 ## Sources
@@ -33,12 +33,15 @@ sources:
     type: amneziawg2_container
     container_name: amnezia-awg2
     interface: awg0
-    client_subnet: 10.8.1.2/32
+    client_scope:
+      mode: address_list
+      addresses: [10.8.1.2/32]
 ```
 
-`client_subnet` is an enforcement boundary, not documentation. The current
-validator accepts one IPv4 host only. Expanding to a pool before canary and
-rollback evidence requires a later explicit configuration version.
+`client_scope` is an enforcement boundary, not documentation. Use
+`address_list` for a staged rollout and `mode: subnet` with the explicit VPN
+CIDR for all users. `0.0.0.0/0` and interface-only wildcard selection are
+rejected. The legacy `client_subnet` field accepts one `/32` during migration.
 
 ### `linux_interface`
 
@@ -50,7 +53,9 @@ sources:
   - tag: generic-vpn
     type: linux_interface
     interface: wg0
-    client_subnet: 10.8.1.2/32
+    client_scope:
+      mode: subnet
+      subnet: 10.8.1.0/24
 ```
 
 The provider-neutral generators support this adapter. The bundled managed
@@ -83,6 +88,34 @@ The generated sing-box configuration uses Docker's local resolver without an
 internal DNS cache so the SOCKS service name can recover after a container
 restart instead of retaining a transient negative answer.
 
+An external SOCKS5 server is provider-neutral:
+
+```yaml
+egresses:
+  - tag: remote-exit
+    type: socks5
+    server: egress.example.net
+    port: 1080
+    healthcheck_url: https://example.com/
+```
+
+The first contract supports a credential-free SOCKS5 endpoint. Protect it with
+network allowlists or a separately managed tunnel; authenticated SOCKS secrets
+are not yet accepted in public YAML.
+
+A separately managed local tunnel can be selected by interface:
+
+```yaml
+egresses:
+  - tag: tunnel-exit
+    type: linux_interface
+    interface: wg-exit
+    healthcheck_url: https://example.com/
+```
+
+The generators support all three adapters. The bundled transactional lifecycle
+currently manages only the AmneziaWG2 plus Tailscale reference combination.
+
 ## Destination sets
 
 Sets may contain IPv4 CIDRs, lower-case ASCII domain suffixes, or both:
@@ -106,11 +139,11 @@ shared CDN, so strict profiles need acceptance testing.
 ## Managed DNS limitations
 
 The generated rules redirect plain client DNS on TCP/UDP port 53 to dnsmasq
-port 5353 for the configured `/32`. dnsmasq populates the owned IPv4 nftables
+port 5353 for the configured client scope. dnsmasq populates the owned IPv4 nftables
 set before returning the answer. DNS TTL and dnsmasq cache lifetime are capped
-at 300 seconds. Dynamic nftables
-entries remain for ten minutes, providing a full cache-lifetime overlap so a
-cached answer cannot create a direct-routing gap at set expiry.
+at 300 seconds. Dynamic nftables entries remain until `disable`, rollback, or a
+fresh apply. This prevents a longer-lived client DNS cache from creating a
+direct-routing gap after an nftables timeout.
 
 DoH, DoT, browser Secure DNS, ECH, direct-IP connections, applications with a
 private resolver, and cached addresses learned before apply bypass suffix

@@ -43,3 +43,20 @@ test('does not reclassify traffic already selected by managed DNS', () => {
   assert.deepEqual(generated.route.rules, [{ inbound: ['capture-in'], outbound: 'regional-exit' }]);
   assert.doesNotMatch(JSON.stringify(generated), /sniff|domain_suffix|ip_cidr/);
 });
+
+test('renders a provider-neutral SOCKS5 egress', () => {
+  const socksConfig = structuredClone(config);
+  socksConfig.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'egress.example.net', port: 1080, healthcheck_url: 'https://example.com/' };
+  assert.deepEqual(generateSingBoxConfig(socksConfig).outbounds[0], {
+    type: 'socks', tag: 'regional-exit', server: 'egress.example.net', server_port: 1080,
+    domain_resolver: { server: 'container-dns', strategy: 'ipv4_only' }
+  });
+});
+
+test('renders a provider-neutral Linux interface egress', () => {
+  const interfaceConfig = structuredClone(config);
+  interfaceConfig.egresses[1] = { tag: 'regional-exit', type: 'linux_interface', interface: 'wg-exit', healthcheck_url: 'https://example.com/' };
+  assert.deepEqual(generateSingBoxConfig(interfaceConfig).outbounds[0], {
+    type: 'direct', tag: 'regional-exit', bind_interface: 'wg-exit'
+  });
+});

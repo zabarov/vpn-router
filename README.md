@@ -1,13 +1,12 @@
 # VPN Router
 
 VPN Router applies one strict, domain-oriented routing policy to traffic that
-arrives through a VPN. Selected IPv4/TCP destinations leave through an isolated
-Tailscale SOCKS5 exit; all other traffic keeps the VPN server's normal direct
-egress.
+arrives through a VPN. Selected IPv4/TCP destinations leave through a strict
+egress adapter; all other traffic keeps the VPN server's normal direct egress.
 
 ```text
 VPN client -> VPN interface -> managed DNS/IP set -> TCP REDIRECT -> sing-box
-                                                            -> Tailscale SOCKS -> exit node
+                                                            -> strict egress -> exit node
                      non-selected traffic --------------------------> direct
 ```
 
@@ -16,23 +15,23 @@ interface in the current Linux namespace, and `amneziawg2_container` is the
 first managed deployment adapter. The routing core does not contain country or
 provider names.
 
-> Status: `0.2.0-pre-alpha`. The generator, secret-safe AmneziaWG2 profile
+> Status: `0.3.0-pre-alpha`. The generator, secret-safe AmneziaWG2 profile
 > extraction, source-scoped fail-closed rules, disposable integration lab, and
-> guarded AmneziaWG2 lifecycle are implemented. Every live deployment still
-> requires a `/32` canary, a backup, a rollback deadman, and operator-reviewed
-> acceptance evidence. This release is not production-ready.
+> guarded AmneziaWG2/Tailscale lifecycle are implemented. Every live deployment
+> still starts with a `/32` canary, a backup, a rollback deadman, and
+> operator-reviewed acceptance evidence. This release is not production-ready.
 
 ## Current guarantee
 
 The pre-alpha contract intentionally stays narrow:
 
-- one active IPv4 source client, expressed as `/32`;
+- one active IPv4 source with an explicit client address list or VPN subnet;
 - one strict destination policy and one `default -> direct` policy;
 - managed plain DNS for domain suffixes;
 - TCP capture only;
 - selected UDP and QUIC rejection;
 - no IPv6 route claim;
-- no direct fallback when sing-box or the Tailscale SOCKS egress is unavailable.
+- no direct fallback when capture or the strict egress is unavailable.
 
 The example regional profile contains `.ru`, `.xn--p1ai`, and `.su`. It is only
 a suffix list. Services hosted on `.com`, `.net`, shared CDNs, or direct IPs
@@ -53,8 +52,8 @@ npm run validate
 ./lab/redirect/verify.sh
 ```
 
-Copy `config.example.yaml`, change only public topology values, and keep the
-first client scope at `/32`:
+Copy `config.example.yaml`, change only topology values, and use an
+`address_list` containing one `/32` for the first live canary:
 
 ```sh
 node bin/vpn-router.mjs validate --config ./router.yaml
@@ -89,17 +88,18 @@ removed or revoked after testing.
 
 ## Managed lifecycle
 
-The guarded lifecycle currently applies only to `amneziawg2_container`:
+The guarded managed lifecycle currently applies to the reference
+`amneziawg2_container` plus `tailscale_socks` combination:
 
 ```sh
 sudo ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
-sudo ./scripts/vpn-router-lifecycle.sh apply --config ./router.yaml --rollback-after 600
+sudo ./scripts/vpn-router-lifecycle.sh enable --config ./router.yaml --rollback-after 600
 sudo ./scripts/vpn-router-lifecycle.sh status --config ./router.yaml
 sudo ./scripts/vpn-router-lifecycle.sh verify --config ./router.yaml
-sudo ./scripts/vpn-router-lifecycle.sh rollback --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh disable --config ./router.yaml
 ```
 
-`apply` always arms a server-side rollback timer. Cancel it only after the
+`enable` always arms a server-side rollback timer. Cancel it only after the
 external direct, strict, DNS, outage, and management checks pass:
 
 ```sh
@@ -108,10 +108,17 @@ sudo ./scripts/vpn-router-lifecycle.sh verify \
   --cancel-deadman
 ```
 
+`disable` is the normal routing switch. It removes only project-owned routing
+resources and preserves the existing VPN and persisted Tailscale enrollment.
+The legacy `apply` and `rollback` commands remain available for automation and
+recovery.
+
 ## Documentation
 
 - [Architecture](docs/developer/architecture.md)
 - [Configuration reference](docs/developer/configuration.md)
+- [External SOCKS5 example](examples/config.socks5.yaml)
+- [Linux tunnel egress example](examples/config.linux-interface.yaml)
 - [Installation and lifecycle](docs/operations/installation.md)
 - [Live validation gate](docs/operations/live-validation.md)
 - [Sanitized pre-alpha validation report](docs/operations/validation-report.md)

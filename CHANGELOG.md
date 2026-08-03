@@ -2,6 +2,29 @@
 
 All notable changes are documented here.
 
+## 0.3.0-pre-alpha - Unreleased
+
+- Replace the single-client enforcement model with an explicit client scope:
+  either a staged list of IPv4 `/32` addresses or the complete VPN subnet.
+- Render every owned nftables rule through one visible client-scope set and
+  reject implicit interface-wide or `0.0.0.0/0` selection.
+- Add provider-neutral strict egress contracts and sing-box rendering for an
+  external SOCKS5 service or a separately managed Linux tunnel interface while
+  retaining Tailscale SOCKS as the managed reference adapter.
+- Add idempotent `enable` and `disable` lifecycle commands as the operator
+  routing switch. Disabling removes only project-owned policy resources and
+  preserves the VPN and Tailscale enrollment state.
+- Report the configured scope mode, entry count, strict egress type, resource
+  health, and drift without exposing credentials.
+- Expand the disposable redirect lab to two selected clients and one excluded
+  control client, including fail-closed egress and capture outages.
+- Publish the production contract, readiness gates, staged rollout model, and
+  honest managed-adapter boundary.
+- Add schema-checked complete examples for an external SOCKS5 exit and a
+  separately managed Linux tunnel interface.
+- Use digest-only sing-box image references so provider naming checks do not
+  misclassify a version tag as a server-specific identifier.
+
 ## 0.2.0-pre-alpha - Unreleased
 
 - Enforce one IPv4 `/32` canary, one strict policy, and one default-direct

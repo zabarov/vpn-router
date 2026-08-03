@@ -2,9 +2,9 @@
 # shellcheck disable=SC1090
 set -euo pipefail
 
-readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box:v1.13.12@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
+readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
 readonly ALPINE_IMAGE='alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d'
-readonly DNS_IMAGE='vpn-router-dns:0.2.0-pre-alpha'
+readonly DNS_IMAGE='vpn-router-dns:0.3.0-pre-alpha'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
@@ -21,6 +21,8 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   vpn-router-lifecycle.sh preflight --config <router.yaml>
+  vpn-router-lifecycle.sh enable --config <router.yaml> --rollback-after <60-3600>
+  vpn-router-lifecycle.sh disable --config <router.yaml>
   vpn-router-lifecycle.sh apply --config <router.yaml> --rollback-after <60-3600>
   vpn-router-lifecycle.sh status --config <router.yaml>
   vpn-router-lifecycle.sh verify --config <router.yaml> [--cancel-deadman]
@@ -48,10 +50,10 @@ while (($# > 0)); do
 done
 
 case "$command_name" in
-  preflight|apply|status|verify|rollback) ;;
+  preflight|enable|disable|apply|status|verify|rollback) ;;
   *) usage; exit 2 ;;
 esac
-if [[ "$command_name" != apply && -n "$rollback_after" ]] \
+if [[ "$command_name" != apply && "$command_name" != enable && -n "$rollback_after" ]] \
   || [[ "$command_name" != verify && "$cancel_deadman" == true ]] \
   || [[ "$command_name" != rollback && "$deadman_call" == true ]]; then
   usage
@@ -83,6 +85,10 @@ eval "$(node "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config
 
 if [[ "$SOURCE_TYPE" != amneziawg2_container ]]; then
   echo 'lifecycle=FAIL: managed apply currently supports amneziawg2_container; linux_interface remains a provider-neutral render adapter' >&2
+  exit 1
+fi
+if [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]]; then
+  echo 'lifecycle=FAIL: the managed AmneziaWG2 adapter currently supports tailscale_socks; use rendered artifacts for an external egress adapter' >&2
   exit 1
 fi
 if [[ "$TAILSCALE_PROXY_SERVER" != "${SERVICE_NAME}-egress" ]]; then
@@ -207,7 +213,7 @@ require_matching_active_manifest() {
     applying|applied|rollback_failed)
       require_manifest_config_match || return 1
       ;;
-    rolled_back) ;;
+    rolled_back|disabled) ;;
     *)
       echo 'lifecycle=FAIL: manifest has an unknown status' >&2
       return 1
@@ -518,7 +524,7 @@ rollback_command() {
   require_manifest_config_match || return 1
   local rollback_ok=true current_source_id name
 
-  if [[ "$MANIFEST_STATUS" == rolled_back ]]; then
+  if [[ "$MANIFEST_STATUS" == rolled_back || "$MANIFEST_STATUS" == disabled ]]; then
     if ! owned_table_exists && ! source_on_proxy_network; then
       local runtime_absent=true
       for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
@@ -529,7 +535,11 @@ rollback_command() {
       done
       if [[ "$runtime_absent" == true ]]; then
         if [[ "$deadman_call" != true ]]; then cancel_deadman_timer; fi
-        echo 'rollback=ALREADY_ROLLED_BACK'
+        if [[ "$command_name" == disable ]]; then
+          echo 'disable=ALREADY_DISABLED'
+        else
+          echo 'rollback=ALREADY_ROLLED_BACK'
+        fi
         return 0
       fi
     fi
@@ -574,9 +584,13 @@ rollback_command() {
     return 1
   fi
 
-  write_manifest rolled_back "$MANIFEST_BACKUP_DIR" false
+  local final_status=rolled_back
+  [[ "$command_name" == disable ]] && final_status=disabled
+  write_manifest "$final_status" "$MANIFEST_BACKUP_DIR" false
   if [[ "$deadman_call" != true ]]; then cancel_deadman_timer; fi
-  if [[ "$deadman_call" == true ]]; then
+  if [[ "$command_name" == disable ]]; then
+    echo 'disable=PASS'
+  elif [[ "$deadman_call" == true ]]; then
     echo 'rollback=PASS_DEADMAN'
   else
     echo 'rollback=PASS'
@@ -679,6 +693,9 @@ status_command() {
     drifted=true
   fi
   echo "status=$reported_status"
+  echo "client_scope_mode=$CLIENT_SCOPE_MODE"
+  echo "client_scope_entries=$(awk -F, '{print NF}' <<<"$CLIENT_SCOPE_CIDRS")"
+  echo "strict_egress_type=$STRICT_EGRESS_TYPE"
   echo "source_container_running=$(container_running "$SOURCE_CONTAINER" && echo true || echo false)"
   echo "capture_running=$(container_running "$CAPTURE_NAME" && echo true || echo false)"
   echo "dns_running=$(container_running "$DNS_NAME" && echo true || echo false)"
@@ -707,10 +724,10 @@ verify_command() {
 
 case "$command_name" in
   preflight) preflight_command ;;
-  apply) apply_command ;;
+  enable|apply) apply_command ;;
   status) status_command ;;
   verify) verify_command ;;
-  rollback)
+  disable|rollback)
     [[ $EUID -eq 0 ]] || { echo 'rollback=FAIL: root privileges are required' >&2; exit 1; }
     rollback_command
     ;;

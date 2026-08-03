@@ -1,0 +1,47 @@
+schema_version: "1.0"
+
+sources:
+  - tag: vpn-in
+    type: linux_interface
+    interface: wg0
+    client_scope:
+      mode: subnet
+      subnet: 10.20.0.0/24
+
+capture:
+  type: redirect
+  listen_port: 12345
+
+egresses:
+  - tag: direct
+    type: direct
+  - tag: remote-exit
+    type: socks5
+    server: egress.example.net
+    port: 1080
+    healthcheck_url: https://example.com/
+
+policies:
+  - tag: selected-services
+    source: vpn-in
+    destination_sets: [selected-services]
+    egress: remote-exit
+    failure_mode: block
+  - tag: default-direct
+    source: vpn-in
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  selected-services:
+    domain_suffixes: [.example]
+
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+
+resources:
+  nftables_table: vpn_router
+  service_name: vpn-router
