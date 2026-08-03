@@ -10,8 +10,10 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   vpn-router version
+  vpn-router discover [--json]
   vpn-router configure [wizard options]
   vpn-router validate [--config <path>]
+  vpn-router doctor [--config <path>]
   vpn-router preflight|enable|disable|status|verify|rollback|reconcile [options]
   vpn-router service-enable [--config <path>]
   vpn-router service-disable
@@ -48,11 +50,25 @@ case "$command_name" in
   configure)
     exec "$node_bin" "$repo_dir/bin/vpn-router-configure.mjs" "$@"
     ;;
+  discover)
+    exec "$node_bin" "$repo_dir/bin/vpn-router-discover.mjs" "$@"
+    ;;
   validate)
     if config_args "$@"; then
       exec "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate "$@"
     fi
     exec "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$default_config" "$@"
+    ;;
+  doctor)
+    if config_args "$@"; then
+      "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate "$@"
+      "$script_dir/vpn-router-lifecycle.sh" preflight "$@"
+    else
+      "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$default_config" "$@"
+      "$script_dir/vpn-router-lifecycle.sh" preflight --config "$default_config" "$@"
+    fi
+    echo 'doctor=PASS'
+    echo 'next=enable with a server-side rollback timer'
     ;;
   preflight|enable|disable|status|verify|rollback|reconcile)
     run_lifecycle "$@"

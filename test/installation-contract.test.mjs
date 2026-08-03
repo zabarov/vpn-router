@@ -44,7 +44,7 @@ test('safe uninstall disables an active runtime and preserves state unless purge
 });
 
 test('installed command exposes configuration, lifecycle, service, and routing switch operations', () => {
-  for (const name of ['configure', 'validate', 'preflight', 'enable', 'disable', 'status', 'verify', 'rollback', 'reconcile', 'service-enable', 'service-disable', 'service-status']) {
+  for (const name of ['discover', 'configure', 'validate', 'doctor', 'preflight', 'enable', 'disable', 'status', 'verify', 'rollback', 'reconcile', 'service-enable', 'service-disable', 'service-status']) {
     assert.match(command, new RegExp(name.replace('-', '[-]')));
   }
   assert.match(command, /default_config=.*\/etc\/vpn-router\/router[.]yaml/);

@@ -30,12 +30,16 @@ Before installing VPN Router, provide:
 Do not use the administrator workstation as the first test client. VPN Router
 does not install or replace the source VPN server.
 
+For a first Tailscale deployment, use the complete [Amnezia and Tailscale quick
+start](tailscale-quickstart.md). It includes exit-device preparation, admin
+approval, safe auth-key handling, and the multi-user expansion procedure.
+
 ## 2. Install from a release checkout
 
 Clone or unpack a reviewed release, then run:
 
 ```sh
-git clone https://github.com/rim/vpn-router.git
+git clone https://github.com/zabarov/vpn-router.git
 cd vpn-router
 sudo ./install.sh install --install-dependencies
 ```
@@ -53,7 +57,22 @@ source hash. The stable `current` symlink is replaced atomically.
 
 ## 3. Create the private configuration
 
-Run the interactive wizard:
+Inspect an Amnezia Docker source without changing it:
+
+```sh
+sudo vpn-router discover
+```
+
+For the common Amnezia plus Tailscale topology, use the guarded preset:
+
+```sh
+sudo vpn-router configure \
+  --preset amnezia-tailscale \
+  --output /etc/vpn-router/router.yaml
+```
+
+It requires a real configured test-client `/32`; it never substitutes example
+topology values. For a provider-neutral interactive setup, run:
 
 ```sh
 sudo vpn-router configure --output /etc/vpn-router/router.yaml
@@ -89,13 +108,19 @@ sudo vpn-router validate
 sudo vpn-router preflight
 ```
 
+`sudo vpn-router doctor` combines those two read-only checks and prints the
+next safe action. A first managed Tailscale check needs the auth-key environment
+described below.
+
 ## 4. Enroll Tailscale without storing an auth key
 
 For first Tailscale enrollment only, export an ephemeral or reusable auth key
 in the root session or inject it from a secret manager:
 
 ```sh
-export VPN_ROUTER_TAILSCALE_AUTH_KEY='set-in-a-secret-manager-or-root-session'
+IFS= read -r -s VPN_ROUTER_TAILSCALE_AUTH_KEY
+export VPN_ROUTER_TAILSCALE_AUTH_KEY
+sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY vpn-router doctor
 sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
   vpn-router enable --rollback-after 600
 unset VPN_ROUTER_TAILSCALE_AUTH_KEY

@@ -1,5 +1,25 @@
 # Troubleshooting
 
+## Discovery found no source or more than one source
+
+Run `sudo vpn-router discover --json`. The source container must be running and
+contain `ip` plus either `awg` or `wg`. Discovery only considers IPv4
+interfaces whose names begin with `awg`, `wg`, `tun`, or `tap`.
+
+If there is more than one candidate, select the intended values explicitly:
+
+```sh
+sudo vpn-router configure \
+  --preset amnezia-tailscale \
+  --source-container amnezia-awg \
+  --source-interface awg0 \
+  --client-addresses 10.8.1.2/32 \
+  --output /etc/vpn-router/router.yaml
+```
+
+Replace all example topology values. If no peer `/32` is listed, create one
+test VPN client first or pass its exact VPN address explicitly.
+
 ## Start with secret-free status
 
 ```sh
@@ -23,6 +43,10 @@ supports gateway priorities.
 For Tailscale first enrollment, provide `VPN_ROUTER_TAILSCALE_AUTH_KEY` only in
 the root command environment. Later starts require the persisted Tailscale
 state, not the key.
+
+Also verify that the exit device advertises exit-node capability, an admin has
+enabled **Use as exit node**, it is awake and online, and any custom Tailnet
+policy permits `autogroup:internet`.
 
 ## Selected domains do not use the strict exit
 

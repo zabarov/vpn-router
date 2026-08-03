@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { chmod, link, mkdir, open, rename, rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { stringify } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
+import { discoverAmneziaSources } from '../src/discovery.mjs';
 
 const defaults = {
   output: './router.yaml',
@@ -24,8 +25,10 @@ const defaults = {
   domains: '.ru,.xn--p1ai,.su',
   serviceName: 'vpn-router',
   nftablesTable: 'vpn_router',
+  preset: null,
   force: false,
-  nonInteractive: false
+  nonInteractive: false,
+  provided: new Set()
 };
 
 const optionMap = new Map([
@@ -44,7 +47,8 @@ const optionMap = new Map([
   ['--healthcheck-url', 'healthcheckUrl'],
   ['--domains', 'domains'],
   ['--service-name', 'serviceName'],
-  ['--nftables-table', 'nftablesTable']
+  ['--nftables-table', 'nftablesTable'],
+  ['--preset', 'preset']
 ]);
 
 function usage() {
@@ -54,6 +58,7 @@ Interactive mode is the default. For automation, add --non-interactive and
 provide topology values explicitly.
 
 Options:
+  --preset <amnezia-tailscale>
   --output <path>
   --source-type <amneziawg2_container|linux_interface>
   --source-container <name>
@@ -74,8 +79,8 @@ Options:
 `;
 }
 
-function parseArgs(argv) {
-  const values = { ...defaults };
+export function parseArgs(argv) {
+  const values = { ...defaults, provided: new Set() };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--force') {
@@ -93,14 +98,62 @@ function parseArgs(argv) {
     const field = optionMap.get(argument);
     if (!field || index + 1 >= argv.length) throw new Error(usage());
     values[field] = argv[index + 1];
+    values.provided.add(field);
     index += 1;
   }
   return values;
 }
 
+export async function applyPreset(values, discover = discoverAmneziaSources) {
+  if (!values.preset) return values;
+  requireChoice(values.preset, ['amnezia-tailscale'], 'preset');
+  values.sourceType = 'amneziawg2_container';
+  values.egressType = 'tailscale_socks';
+
+  const sourceIsExplicit = values.provided.has('sourceContainer') && values.provided.has('sourceInterface');
+  if (!sourceIsExplicit) {
+    const candidates = await discover();
+    const matching = candidates.filter((candidate) =>
+      (!values.provided.has('sourceContainer') || candidate.container_name === values.sourceContainer)
+      && (!values.provided.has('sourceInterface') || candidate.interface === values.sourceInterface));
+    if (matching.length !== 1) {
+      throw new Error(matching.length === 0
+        ? 'The amnezia-tailscale preset could not find a unique VPN source. Run "vpn-router discover" and pass --source-container and --source-interface.'
+        : 'The amnezia-tailscale preset found multiple VPN sources. Run "vpn-router discover" and select one with --source-container and --source-interface.');
+    }
+    const candidate = matching[0];
+    values.sourceContainer = candidate.container_name;
+    values.sourceInterface = candidate.interface;
+    if (!values.provided.has('clientSubnet')) values.clientSubnet = candidate.client_subnet;
+    if (!values.provided.has('clientAddresses')) {
+      if (candidate.client_addresses.length === 0) {
+        throw new Error('No configured VPN client /32 was discovered. Add one test client or pass --client-addresses explicitly.');
+      }
+      values.clientAddresses = candidate.client_addresses[0];
+      values.provided.add('clientAddresses');
+    }
+  }
+
+  if (values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
+    throw new Error('The preset requires a real canary /32. Pass --client-addresses or omit source options so discovery can select a configured client.');
+  }
+  if (values.nonInteractive && !values.provided.has('exitNode')) {
+    throw new Error('The non-interactive amnezia-tailscale preset requires --exit-node.');
+  }
+  if (!values.provided.has('exitNode')) values.exitNode = '';
+  return values;
+}
+
 async function ask(rl, label, current) {
-  const answer = (await rl.question(`${label} [${current}]: `)).trim();
+  const suffix = current ? ` [${current}]` : '';
+  const answer = (await rl.question(`${label}${suffix}: `)).trim();
   return answer || current;
+}
+
+async function askRequired(rl, label, current) {
+  let value = current;
+  while (!value) value = await ask(rl, label, value);
+  return value;
 }
 
 async function collectInteractive(values) {
@@ -120,7 +173,7 @@ async function collectInteractive(values) {
     }
     values.egressType = await ask(rl, 'Strict egress type', values.egressType);
     if (values.egressType === 'tailscale_socks') {
-      values.exitNode = await ask(rl, 'Tailscale exit node name or IP', values.exitNode);
+      values.exitNode = await askRequired(rl, 'Tailscale exit node name or IP', values.exitNode);
     } else if (values.egressType === 'socks5') {
       values.socksServer = await ask(rl, 'SOCKS5 server visible from the VPN namespace', values.socksServer);
       values.socksPort = await ask(rl, 'SOCKS5 port', values.socksPort);
@@ -145,7 +198,7 @@ function requireChoice(value, allowed, label) {
   if (!allowed.includes(value)) throw new Error(`${label} must be one of: ${allowed.join(', ')}`);
 }
 
-function buildConfig(values) {
+export function buildConfig(values) {
   requireChoice(values.sourceType, ['amneziawg2_container', 'linux_interface'], 'source type');
   requireChoice(values.clientScope, ['address_list', 'subnet'], 'client scope');
   requireChoice(values.egressType, ['tailscale_socks', 'socks5', 'linux_interface'], 'egress type');
@@ -231,6 +284,7 @@ async function writeExclusive(path, content, force) {
 
 async function main() {
   let values = parseArgs(process.argv.slice(2));
+  values = await applyPreset(values);
   if (!values.nonInteractive) values = await collectInteractive(values);
   const config = buildConfig(values);
   const result = validateConfig(config);
@@ -240,7 +294,9 @@ async function main() {
   process.stdout.write(`configuration=CREATED\npath=${output}\nmode=0600\n`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && basename(process.argv[1]) === 'vpn-router-configure.mjs') {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

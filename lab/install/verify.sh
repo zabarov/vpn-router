@@ -13,8 +13,11 @@ docker run --rm \
     apt-get install -y ca-certificates curl xz-utils >/dev/null
     /src/install.sh install --no-systemd --skip-runtime-check
     test "$(vpn-router version)" = "$(cat /src/VERSION)"
+    vpn-router discover --help >/dev/null
     vpn-router configure --non-interactive --output /etc/vpn-router/router.yaml \
-      --source-container source-vpn --client-addresses 10.44.0.2/32 \
+      --preset amnezia-tailscale \
+      --source-container source-vpn --source-interface awg0 \
+      --client-addresses 10.44.0.2/32 \
       --exit-node exit.example.ts.net >/dev/null
     vpn-router validate >/dev/null
     old_release=$(readlink /opt/vpn-router/current)

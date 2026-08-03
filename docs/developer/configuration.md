@@ -9,6 +9,12 @@ The YAML contract is published as
 [`schema/config.schema.json`](../../schema/config.schema.json). The custom
 validator adds semantic safety rules that JSON Schema cannot express compactly.
 
+For the common managed topology, `vpn-router discover` reads the running Docker
+source without changing it, and `vpn-router configure --preset
+amnezia-tailscale` fills the detected container, interface, subnet, and one
+real canary `/32`. Ambiguous discovery fails closed and requires explicit
+source flags. The preset never writes an auth key.
+
 ## Pre-alpha shape
 
 The current pre-alpha contract requires:

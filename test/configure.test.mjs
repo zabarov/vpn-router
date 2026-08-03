@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
+import { applyPreset, parseArgs } from '../bin/vpn-router-configure.mjs';
 
 const configurePath = new URL('../bin/vpn-router-configure.mjs', import.meta.url);
 
@@ -92,4 +93,67 @@ test('wizard rejects unknown topology choices instead of silently changing adapt
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('amnezia-tailscale preset requires explicit real topology in non-interactive mode', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vpn-router-configure-'));
+  const output = join(directory, 'router.yaml');
+  try {
+    const missingCanary = spawnSync(process.execPath, [configurePath.pathname,
+      '--non-interactive', '--preset', 'amnezia-tailscale', '--output', output,
+      '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+      '--exit-node', 'exit.example.ts.net'
+    ], { encoding: 'utf8' });
+    assert.notEqual(missingCanary.status, 0);
+    assert.match(missingCanary.stderr, /requires a real canary \/32/);
+
+    const missingExit = spawnSync(process.execPath, [configurePath.pathname,
+      '--non-interactive', '--preset', 'amnezia-tailscale', '--output', output,
+      '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+      '--client-addresses', '10.8.1.9/32'
+    ], { encoding: 'utf8' });
+    assert.notEqual(missingExit.status, 0);
+    assert.match(missingExit.stderr, /requires --exit-node/);
+
+    const result = spawnSync(process.execPath, [configurePath.pathname,
+      '--non-interactive', '--preset', 'amnezia-tailscale', '--output', output,
+      '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+      '--client-addresses', '10.8.1.9/32', '--exit-node', 'exit.example.ts.net'
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const config = parse(await readFile(output, 'utf8'));
+    assert.equal(config.sources[0].container_name, 'amnezia-awg');
+    assert.deepEqual(config.sources[0].client_scope.addresses, ['10.8.1.9/32']);
+    assert.equal(config.egresses[0].type, 'tailscale_socks');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('amnezia-tailscale preset auto-selects one discovered source and one canary', async () => {
+  const values = parseArgs(['--preset', 'amnezia-tailscale', '--exit-node', 'exit.example.ts.net']);
+  const configured = await applyPreset(values, async () => [{
+    container_name: 'discovered-amnezia',
+    interface: 'awg7',
+    client_subnet: '10.44.0.0/24',
+    client_addresses: ['10.44.0.3/32', '10.44.0.8/32']
+  }]);
+  assert.equal(configured.sourceContainer, 'discovered-amnezia');
+  assert.equal(configured.sourceInterface, 'awg7');
+  assert.equal(configured.clientSubnet, '10.44.0.0/24');
+  assert.equal(configured.clientAddresses, '10.44.0.3/32');
+});
+
+test('amnezia-tailscale preset permits an explicit subnet only after canary rollout', async () => {
+  const values = parseArgs([
+    '--non-interactive', '--preset', 'amnezia-tailscale',
+    '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+    '--client-scope', 'subnet', '--client-subnet', '10.8.1.0/24',
+    '--exit-node', 'exit.example.ts.net'
+  ]);
+  const configured = await applyPreset(values, async () => {
+    throw new Error('discovery must not run for explicit topology');
+  });
+  assert.equal(configured.clientScope, 'subnet');
+  assert.equal(configured.clientSubnet, '10.8.1.0/24');
 });

@@ -48,21 +48,28 @@ paths for a strict canary.
 On a Debian or Ubuntu host with an existing AmneziaWG2 Docker container:
 
 ```sh
-git clone https://github.com/rim/vpn-router.git
+git clone https://github.com/zabarov/vpn-router.git
 cd vpn-router
 sudo ./install.sh install --install-dependencies
-sudo vpn-router configure --output /etc/vpn-router/router.yaml
-sudo vpn-router validate
-sudo vpn-router preflight
+sudo vpn-router discover
+sudo vpn-router configure \
+  --preset amnezia-tailscale \
+  --output /etc/vpn-router/router.yaml
 ```
 
 The installer provides a pinned private Node.js runtime, the `vpn-router`
 command, atomic upgrades, a previous-version rollback, safe uninstall, and an
 opt-in systemd service. It does not install or replace the source VPN.
 
-Read the complete [installation and lifecycle guide](docs/operations/installation.md)
-before `enable`. The first live client scope must be one test `/32`, and enable
-always requires a server-side rollback timer.
+For the simplest complete path, follow [Amnezia and Tailscale quick
+start](docs/operations/tailscale-quickstart.md). It covers preparing an exit
+device, creating a one-off Tailscale key, safe first enrollment, testing one
+client, expanding to all VPN users, and using the routing switch.
+
+For other egress adapters, read the complete [installation and lifecycle
+guide](docs/operations/installation.md) before `enable`. The first live client
+scope must be one test `/32`, and enable always requires a server-side rollback
+timer.
 
 ## Contributor quick start
 
@@ -149,6 +156,7 @@ recovery.
 
 ## Documentation
 
+- [Amnezia and Tailscale quick start](docs/operations/tailscale-quickstart.md)
 - [Architecture](docs/developer/architecture.md)
 - [Configuration reference](docs/developer/configuration.md)
 - [External SOCKS5 example](examples/config.socks5.yaml)
