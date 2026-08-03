@@ -36,11 +36,13 @@ jobs:
       - name: Run static and unit checks
         run: npm run check
 
+      # Capture the host baseline before any Docker bridge lab can leave
+      # asynchronously disappearing interfaces on the shared runner.
+      - name: Verify generic Linux VPN interface lifecycle
+        run: npm run check:linux-host
+
       - name: Run disposable container labs
         run: npm run check:containers
 
       - name: Verify clean-host packaging lifecycle
         run: npm run check:clean-host
-
-      - name: Verify generic Linux VPN interface lifecycle
-        run: npm run check:linux-host
