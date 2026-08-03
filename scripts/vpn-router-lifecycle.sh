@@ -657,9 +657,15 @@ rollback_command() {
 
   compose down --remove-orphans >/dev/null 2>&1 || rollback_ok=false
 
-  wait_for_owned_runtime_absent || rollback_ok=false
+  wait_for_owned_runtime_absent || {
+    echo 'rollback=FAIL: a project-owned runtime resource is still present' >&2
+    rollback_ok=false
+  }
   if [[ -n "$current_source_id" && "$current_source_id" == "$MANIFEST_SOURCE_ID" ]]; then
-    wait_for_baseline_restored || rollback_ok=false
+    wait_for_baseline_restored || {
+      echo 'rollback=FAIL: the stable host or source network baseline changed' >&2
+      rollback_ok=false
+    }
   fi
 
   if [[ "$rollback_ok" != true ]]; then

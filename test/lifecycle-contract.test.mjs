@@ -122,7 +122,7 @@ test('rollback verifies absence before reporting success', async () => {
   const rollbackStart = source.indexOf('rollback_command()');
   const rollbackEnd = source.indexOf('apply_command()', rollbackStart);
   const rollback = source.slice(rollbackStart, rollbackEnd);
-  assert.match(rollback, /wait_for_owned_runtime_absent \|\| rollback_ok=false/);
+  assert.match(rollback, /wait_for_owned_runtime_absent \|\| \{/);
   assert.match(rollback, /write_manifest rollback_failed/);
   assert.match(rollback, /cancel_deadman_timer/);
   assert.match(rollback, /rollback=ALREADY_ROLLED_BACK/);
@@ -130,7 +130,7 @@ test('rollback verifies absence before reporting success', async () => {
   assert.match(rollback, /compose stop vpn-router >\/dev\/null/);
   assert.match(rollback, /if container_exists "\$DNS_NAME"/);
   assert.match(rollback, /compose stop vpn-router-dns >\/dev\/null/);
-  assert.match(rollback, /wait_for_baseline_restored \|\| rollback_ok=false/);
+  assert.match(rollback, /wait_for_baseline_restored \|\| \{/);
 });
 
 test('rollback tolerates bounded asynchronous resource and route cleanup', async () => {

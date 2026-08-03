@@ -85,10 +85,34 @@ assert_blocked() {
   fi
 }
 
+network_snapshot() {
+  local destination=$1
+  {
+    ip -j address show
+    ip -j route show table all
+    ip -j rule show
+  } >"$destination"
+}
+
+wait_for_stable_host_network() {
+  local _attempt previous="$runtime_dir/network-previous.json" current="$runtime_dir/network-current.json"
+  network_snapshot "$previous"
+  for _attempt in {1..15}; do
+    sleep 1
+    network_snapshot "$current"
+    if cmp -s "$previous" "$current"; then return 0; fi
+    mv "$current" "$previous"
+  done
+  echo 'linux_interface_lab=FAIL: host networking did not stabilize before baseline capture' >&2
+  return 1
+}
+
 for _attempt in {1..20}; do
   if curl -4fsS --socks5-hostname 127.0.0.1:18080 --connect-timeout 2 --max-time 5 https://example.com/ >/dev/null 2>&1; then break; fi
   sleep 1
 done
+
+wait_for_stable_host_network
 
 "$lifecycle" preflight --config "$config_path"
 "$lifecycle" enable --config "$config_path" --rollback-after 120
