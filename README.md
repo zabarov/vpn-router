@@ -123,7 +123,8 @@ recovery.
 - [Linux tunnel egress example](examples/config.linux-interface.yaml)
 - [Installation and lifecycle](docs/operations/installation.md)
 - [Live validation gate](docs/operations/live-validation.md)
-- [Sanitized pre-alpha validation report](docs/operations/validation-report.md)
+- [Sanitized 0.3 multi-client validation report](docs/operations/validation-report-0.3.md)
+- [Sanitized 0.2 canary validation report](docs/operations/validation-report.md)
 - [AmneziaWG2 deployment model](docs/operations/amneziawg2-sidecar.md)
 - [Ownership and rollback contract](docs/operations/deployment-contract.md)
 

@@ -23,6 +23,9 @@ All notable changes are documented here.
   honest managed-adapter boundary.
 - Add schema-checked complete examples for an external SOCKS5 exit and a
   separately managed Linux tunnel interface.
+- Record the sanitized staged live rollout from one canary to all existing
+  peers and then the explicit full VPN subnet, including routing-switch,
+  fail-closed outage, recovery, peer-integrity and route-stability evidence.
 - Use digest-only sing-box image references so provider naming checks do not
   misclassify a version tag as a server-specific identifier.
 

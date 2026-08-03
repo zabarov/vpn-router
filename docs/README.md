@@ -14,6 +14,7 @@
 - [Configuration reference](developer/configuration.md)
 - [Production contract](developer/production-contract.md)
 - [Production readiness](developer/production-readiness.md)
+- [0.3 multi-client validation report](operations/validation-report-0.3.md)
 
 ## Repository contract
 

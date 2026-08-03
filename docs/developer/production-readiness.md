@@ -1,23 +1,23 @@
 # Production readiness
 
 The project is currently pre-alpha. The working reference deployment proves the
-IPv4/TCP data path for one client, but production status requires the following
-gates.
+IPv4/TCP data path for the complete configured VPN client pool, but production
+status still requires the following gates.
 
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
-| Configuration | Client list/subnet selectors, migration, negative validation | Implemented; integration expansion pending |
+| Configuration | Client list/subnet selectors, migration, negative validation | Passed in unit, container and live staged rollout |
 | Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 data path and all generator fixtures pass; Linux-interface integration pending |
-| Routing switch | Idempotent enable/disable with preserved VPN and egress state | Implemented; disposable lifecycle proof pending |
+| Routing switch | Idempotent enable/disable with preserved VPN and egress state | Passed between live list and subnet stages |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
-| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Partial |
+| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tailscale and capture outages passed in container and live stages; broader matrix remains |
 | Restart lifecycle | Host reboot, Docker restart and source recreation | Planned |
 | Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Planned |
-| Observability | Scope, adapter health, drift and counters in secret-free status | Planned |
+| Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
 | Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Planned |
-| Live rollout | Canary, list and subnet stages with backup and deadman rollback | Blocked until prior gates pass |
+| Live rollout | Canary, list and subnet stages with backup and deadman rollback | Passed on the reference AmneziaWG2 plus Tailscale deployment |
 
 ## Release levels
 
