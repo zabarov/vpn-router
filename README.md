@@ -1,85 +1,129 @@
 # VPN Router
 
-VPN Router is a provider-neutral, policy-based router for traffic that arrives
-through a VPN and must leave through a selected egress path.
-
-Its first target topology is:
+VPN Router applies one strict, domain-oriented routing policy to traffic that
+arrives through a VPN. Selected IPv4/TCP destinations leave through an isolated
+Tailscale SOCKS5 exit; all other traffic keeps the VPN server's normal direct
+egress.
 
 ```text
-VPN client -> AmneziaWG 2 container -> VPN Router sidecar -> isolated SOCKS5 proxy -> Tailscale exit node
+VPN client -> VPN interface -> managed DNS/IP set -> TCP REDIRECT -> sing-box
+                                                            -> Tailscale SOCKS -> exit node
+                     non-selected traffic --------------------------> direct
 ```
 
-The router is deliberately adapter-based. AmneziaWG 2 and a generic Linux
-network interface are the initial traffic source adapters, while Tailscale is
-the first egress adapter; none is baked into the core policy model. The
-Tailscale adapter is intentionally isolated from the VPN container namespace so
-an exit-node route cannot replace the VPN's own default route.
+The policy model is provider-neutral. `linux_interface` represents a VPN
+interface in the current Linux namespace, and `amneziawg2_container` is the
+first managed deployment adapter. The routing core does not contain country or
+provider names.
 
-> Status: pre-alpha. This repository currently provides the configuration
-> contract, examples, and local validation tooling. It does not yet install or
-> modify a server.
+> Status: `0.2.0-pre-alpha`. The generator, secret-safe AmneziaWG2 profile
+> extraction, source-scoped fail-closed rules, disposable integration lab, and
+> guarded AmneziaWG2 lifecycle are implemented. Every live deployment still
+> requires a `/32` canary, a backup, a rollback deadman, and operator-reviewed
+> acceptance evidence. This release is not production-ready.
 
-## What it is for
+## Current guarantee
 
-- Route selected destinations through a chosen egress, such as a Tailscale exit
-  node.
-- Keep all other traffic on a direct path.
-- Block selected traffic when its strict egress is unavailable instead of
-  silently leaking it through the direct path.
-- Support VPN implementations whose client interface exists inside a container
-  network namespace.
+The pre-alpha contract intentionally stays narrow:
 
-## Design principles
+- one active IPv4 source client, expressed as `/32`;
+- one strict destination policy and one `default -> direct` policy;
+- managed plain DNS for domain suffixes;
+- TCP capture only;
+- selected UDP and QUIC rejection;
+- no IPv6 route claim;
+- no direct fallback when sing-box or the Tailscale SOCKS egress is unavailable.
 
-- **Adapter-based:** traffic sources and egresses are explicit adapters.
-- **Pre-NAT capture:** an AmneziaWG 2 adapter must observe `awg0` inside the
-  Amnezia container namespace, before its NAT rules rewrite the client source.
-- **Fail closed:** a policy marked `block` never falls back to direct egress.
-- **Owned resources:** routing marks, route tables, nftables tables, state
-  directories, and service names are configured rather than assumed.
-- **No secrets in config:** reference credentials only through environment
-  variable names or local secret files ignored by Git.
+The example regional profile contains `.ru`, `.xn--p1ai`, and `.su`. It is only
+a suffix list. Services hosted on `.com`, `.net`, shared CDNs, or direct IPs
+must be added deliberately and can have shared-IP side effects.
+
+Chrome Secure DNS, other DoH/DoT clients, ECH, direct-IP connections, and IPv6
+are outside the guaranteed mode. Use system DNS and disable those alternate
+paths for a strict canary.
 
 ## Quick start
 
-Requires Node.js 22 or newer.
+Requires Node.js 22 or newer and Docker for container checks.
 
 ```sh
-npm install
+npm ci
 npm test
 npm run validate
+./lab/redirect/verify.sh
 ```
 
-`config.example.yaml` is safe to copy and adapt. Validate a local file before
-using it:
+Copy `config.example.yaml`, change only public topology values, and keep the
+first client scope at `/32`:
 
 ```sh
 node bin/vpn-router.mjs validate --config ./router.yaml
+./scripts/prepare-amneziawg2-artifacts.sh \
+  --config ./router.yaml \
+  --output-dir ./build/vpn-router
+```
+
+## AmneziaWG2 text keys
+
+An Amnezia `vpn://` key can embed the native AWG2 profile. Extract it into a
+private temporary directory without printing its contents:
+
+```sh
+umask 077
+./scripts/extract-amneziawg2-profile.mjs \
+  --input ./client-profile.vpn \
+  --output ./private/awg0.conf
+```
+
+On a separate Linux host, the isolated validation runner uses the pinned
+`amneziavpn/amneziawg-go` image, `/dev/net/tun`, and only `NET_ADMIN`/`NET_RAW`.
+It checks handshake, DNS, HTTPS, transfer, host-route stability, and cleanup:
+
+```sh
+sudo ./scripts/run-isolated-amneziawg2-client.sh \
+  --input ./client-profile.vpn
+```
+
+The original `.vpn` file remains the operator's responsibility and must be
+removed or revoked after testing.
+
+## Managed lifecycle
+
+The guarded lifecycle currently applies only to `amneziawg2_container`:
+
+```sh
+sudo ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh apply --config ./router.yaml --rollback-after 600
+sudo ./scripts/vpn-router-lifecycle.sh status --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh verify --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh rollback --config ./router.yaml
+```
+
+`apply` always arms a server-side rollback timer. Cancel it only after the
+external direct, strict, DNS, outage, and management checks pass:
+
+```sh
+sudo ./scripts/vpn-router-lifecycle.sh verify \
+  --config ./router.yaml \
+  --cancel-deadman
 ```
 
 ## Documentation
 
 - [Architecture](docs/developer/architecture.md)
 - [Configuration reference](docs/developer/configuration.md)
-- [Installation and safety boundaries](docs/operations/installation.md)
+- [Installation and lifecycle](docs/operations/installation.md)
 - [Live validation gate](docs/operations/live-validation.md)
-- [AmneziaWG 2 sidecar deployment model](docs/operations/amneziawg2-sidecar.md)
-- [Deployment contract and rollback boundary](docs/operations/deployment-contract.md)
-- [Documentation map](docs/README.md)
-
-## Scope and non-goals
-
-The initial release is not a generic VPN server installer, a Tailscale control
-plane, or a promise that arbitrary VPN providers work without an adapter. It
-does not change host firewall, routes, Docker, DNS, or Tailnet state merely by
-running the validator.
+- [Sanitized pre-alpha validation report](docs/operations/validation-report.md)
+- [AmneziaWG2 deployment model](docs/operations/amneziawg2-sidecar.md)
+- [Ownership and rollback contract](docs/operations/deployment-contract.md)
 
 ## Security
 
-Do not commit private keys, Tailscale auth keys, VPN configurations, hostnames,
-or inventory output. Report security issues using
-[SECURITY.md](SECURITY.md).
+Never commit VPN profiles, private keys, Tailscale auth keys, real hostnames,
+IP addresses, or raw inventory. Local operational material belongs in the
+ignored `source/` directory. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT. See [LICENSE](LICENSE).

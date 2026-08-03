@@ -4,6 +4,18 @@ function setName(tag) {
   return `set_${tag.replaceAll('-', '_')}`;
 }
 
+function staticSetName(tag) {
+  return `${setName(tag)}_static`;
+}
+
+function dnsSetName(tag) {
+  return `${setName(tag)}_dns`;
+}
+
+function packetSelector(source, destinationSet) {
+  return `iifname "${source.interface}" ip saddr ${source.client_subnet} ip daddr @${destinationSet}`;
+}
+
 export function generateNftablesConfig(config) {
   const validation = validateConfig(config);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
@@ -17,35 +29,57 @@ export function generateNftablesConfig(config) {
   for (const name of sets) {
     const cidrs = config.destination_sets[name].ip_cidrs ?? [];
     const suffixes = config.destination_sets[name].domain_suffixes ?? [];
-    const ipv4 = cidrs.filter((cidr) => !cidr.includes(':'));
-    if (ipv4.length > 0) lines.push(`  set ${setName(name)} { type ipv4_addr; flags interval; elements = { ${ipv4.join(', ')} } }`);
-    else if (suffixes.length > 0) lines.push(`  set ${setName(name)} { type ipv4_addr; flags interval; }`);
+    if (cidrs.length > 0) lines.push(`  set ${staticSetName(name)} { type ipv4_addr; flags interval; elements = { ${cidrs.join(', ')} } }`);
+    if (suffixes.length > 0) lines.push(`  set ${dnsSetName(name)} { type ipv4_addr; flags interval, timeout; timeout 10m; gc-interval 1m; }`);
   }
 
-  const hasStrictDomains = sets.some((name) => (config.destination_sets[name].domain_suffixes ?? []).length > 0);
-  if (hasStrictDomains && config.traffic_handling.dns_mode === 'managed') {
-    lines.push('  chain dns_redirect {');
-    lines.push('    type nat hook prerouting priority dstnat; policy accept;');
-    for (const policy of strictPolicies) {
-      const source = config.sources.find((candidate) => candidate.tag === policy.source);
-      lines.push(`    iifname "${source.interface}" udp dport 53 redirect to :5353`);
-      lines.push(`    iifname "${source.interface}" tcp dport 53 redirect to :5353`);
-    }
-    lines.push('  }');
-  }
-
-  lines.push('  chain prerouting {');
-  lines.push('    type filter hook prerouting priority mangle; policy accept;');
+  const strictSelectors = [];
   for (const policy of strictPolicies) {
     const source = config.sources.find((candidate) => candidate.tag === policy.source);
     for (const destinationSet of policy.destination_sets.filter((name) => name !== 'default')) {
       const destination = config.destination_sets[destinationSet];
-      const ipv4 = (destination.ip_cidrs ?? []).filter((cidr) => !cidr.includes(':'));
-      const suffixes = destination.domain_suffixes ?? [];
-      if (ipv4.length > 0 || suffixes.length > 0) lines.push(`    iifname "${source.interface}" ip daddr @${setName(destinationSet)} meta l4proto tcp tproxy ip to :${config.capture.listen_port} meta mark set ${config.resources.routing_mark} accept`);
+      const destinationSets = [];
+      if ((destination.ip_cidrs ?? []).length > 0) destinationSets.push(staticSetName(destinationSet));
+      if ((destination.domain_suffixes ?? []).length > 0) destinationSets.push(dnsSetName(destinationSet));
+      for (const nftSet of destinationSets) {
+        strictSelectors.push({ source, selector: packetSelector(source, nftSet) });
+      }
     }
-    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" udp dport 443 reject`);
-    if (config.traffic_handling.ipv6 === 'reject') lines.push(`    iifname "${source.interface}" ip6 daddr ::/0 reject`);
+  }
+
+  lines.push('  chain capture_redirect {');
+  lines.push('    type nat hook prerouting priority dstnat; policy accept;');
+  const hasStrictDomains = sets.some((name) => (config.destination_sets[name].domain_suffixes ?? []).length > 0);
+  if (hasStrictDomains && config.traffic_handling.dns_mode === 'managed') {
+    for (const policy of strictPolicies) {
+      const source = config.sources.find((candidate) => candidate.tag === policy.source);
+      lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} udp dport 53 counter redirect to :5353`);
+      lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} tcp dport 53 counter redirect to :5353`);
+    }
+  }
+  for (const { selector } of strictSelectors) {
+    lines.push(`    ${selector} meta l4proto tcp counter redirect to :${config.capture.listen_port}`);
+  }
+  lines.push('  }');
+
+  lines.push('  chain prerouting_guard {');
+  lines.push('    type filter hook prerouting priority mangle; policy accept;');
+  for (const { selector } of strictSelectors) {
+    lines.push(`    ${selector} meta l4proto udp counter reject`);
+  }
+  for (const policy of strictPolicies) {
+    const source = config.sources.find((candidate) => candidate.tag === policy.source);
+    if (config.traffic_handling.udp_quic === 'reject') lines.push(`    iifname "${source.interface}" ip saddr ${source.client_subnet} udp dport 443 counter reject`);
+  }
+  lines.push('  }');
+
+  // A selected TCP packet reaches this hook only if the NAT redirect did not
+  // claim it. Rejecting here turns a missing/broken redirect into fail-closed
+  // behavior while normal redirected traffic is delivered through INPUT.
+  lines.push('  chain forward_guard {');
+  lines.push('    type filter hook forward priority filter; policy accept;');
+  for (const { selector } of strictSelectors) {
+    lines.push(`    ${selector} meta l4proto tcp counter reject with tcp reset`);
   }
   lines.push('  }');
   lines.push('}');

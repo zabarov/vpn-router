@@ -2,9 +2,36 @@ import { isIP } from 'node:net';
 
 const tagPattern = /^[a-z][a-z0-9-]{1,62}$/;
 const environmentNamePattern = /^[A-Z][A-Z0-9_]{2,127}$/;
+const interfaceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$/;
+const containerNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+const networkAddressPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,252}$/;
+const nftablesTablePattern = /^[a-z][a-z0-9_]{2,31}$/;
+const serviceNamePattern = /^[a-z][a-z0-9-]{2,63}$/;
+
+const rootFields = new Set(['schema_version', 'sources', 'capture', 'egresses', 'policies', 'destination_sets', 'traffic_handling', 'resources']);
+const captureFields = new Set(['type', 'listen_port']);
+const destinationSetFields = new Set(['ip_cidrs', 'domain_suffixes']);
+const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet']);
+const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet']);
+const directEgressFields = new Set(['tag', 'type']);
+const tailscaleEgressFields = new Set(['tag', 'type', 'auth_key_env', 'exit_node', 'proxy_server', 'proxy_port', 'healthcheck_url']);
+const policyFields = new Set(['tag', 'source', 'destination_sets', 'egress', 'failure_mode']);
+const trafficHandlingFields = new Set(['udp_quic', 'ipv6', 'dns_mode']);
+const resourceFields = new Set(['nftables_table', 'service_name']);
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function rejectUnknownKeys(value, allowedFields, label, errors) {
+  if (!isObject(value)) return;
+  for (const key of Object.keys(value)) {
+    if (!allowedFields.has(key)) errors.push(`${label} has an unsupported field: ${key}`);
+  }
+}
+
+function rejectDuplicates(values, label, errors) {
+  if (Array.isArray(values) && new Set(values).size !== values.length) errors.push(`${label} must not contain duplicates`);
 }
 
 function uniqueTags(items, label, errors) {
@@ -28,39 +55,71 @@ function validCidr(value) {
   return Number.isInteger(Number(prefix)) && Number(prefix) >= 0 && Number(prefix) <= maxPrefix;
 }
 
+function validIpv4Cidr(value) {
+  return validCidr(value) && isIP(value.split('/')[0]) === 4;
+}
+
+function isSingleHostIpv4Cidr(value) {
+  return validIpv4Cidr(value) && value.endsWith('/32');
+}
+
 function validDomainSuffix(value) {
-  return typeof value === 'string' && /^\.[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+  if (typeof value !== 'string' || !value.startsWith('.') || value.length > 254) return false;
+  return value.slice(1).split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
+function validHttpsUrl(value) {
+  if (typeof value !== 'string' || /[\s\u0000-\u001f\u007f]/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname !== '' && url.username === '' && url.password === '' && url.hash === '';
+  } catch {
+    return false;
+  }
 }
 
 export function validateConfig(config) {
   const errors = [];
   if (!isObject(config)) return { valid: false, errors: ['configuration must be a YAML object'] };
+  rejectUnknownKeys(config, rootFields, 'configuration', errors);
   if (config.schema_version !== '1.0') errors.push('schema_version must be "1.0"');
 
+  let requiredListsAreUsable = true;
   for (const key of ['sources', 'egresses', 'policies']) {
-    if (!Array.isArray(config[key]) || config[key].length === 0) errors.push(`${key} must be a non-empty list`);
+    if (!Array.isArray(config[key]) || config[key].length === 0) {
+      errors.push(`${key} must be a non-empty list`);
+      requiredListsAreUsable = false;
+    }
   }
-  if (errors.length) return { valid: false, errors };
+  if (!requiredListsAreUsable) return { valid: false, errors };
 
-  if (!isObject(config.capture) || config.capture.type !== 'tproxy' || !Number.isInteger(config.capture.listen_port) || config.capture.listen_port < 1024 || config.capture.listen_port > 65535) {
-    errors.push('capture must declare tproxy with a non-privileged listen_port');
+  if (config.sources.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one active source');
+  if (config.policies.length !== 2) errors.push('the IPv4/TCP MVP requires exactly one strict policy and one default-direct policy');
+
+  if (!isObject(config.capture) || config.capture.type !== 'redirect' || !Number.isInteger(config.capture.listen_port) || config.capture.listen_port < 1024 || config.capture.listen_port > 65535) {
+    errors.push('capture must declare redirect with a non-privileged listen_port');
   }
+  rejectUnknownKeys(config.capture, captureFields, 'capture', errors);
 
   if (!isObject(config.destination_sets)) {
     errors.push('destination_sets must be an object');
   } else {
     for (const [name, destinationSet] of Object.entries(config.destination_sets)) {
+      if (!tagPattern.test(name)) errors.push(`destination set has an invalid name: ${JSON.stringify(name)}`);
       if (!isObject(destinationSet)) {
         errors.push(`destination set ${name} must be an object`);
         continue;
       }
+      rejectUnknownKeys(destinationSet, destinationSetFields, `destination set ${name}`, errors);
       const cidrs = destinationSet.ip_cidrs ?? [];
       const suffixes = destinationSet.domain_suffixes ?? [];
       if ((!Array.isArray(cidrs) || cidrs.length === 0) && (!Array.isArray(suffixes) || suffixes.length === 0)) {
         errors.push(`destination set ${name} requires ip_cidrs or domain_suffixes`);
       }
-      if (!Array.isArray(cidrs) || cidrs.some((cidr) => !validCidr(cidr))) errors.push(`destination set ${name} has an invalid ip_cidrs entry`);
+      if (!Array.isArray(cidrs) || cidrs.some((cidr) => !validIpv4Cidr(cidr))) errors.push(`destination set ${name} has an invalid IPv4 ip_cidrs entry`);
       if (!Array.isArray(suffixes) || suffixes.some((suffix) => !validDomainSuffix(suffix))) errors.push(`destination set ${name} has an invalid domain_suffixes entry`);
+      rejectDuplicates(cidrs, `destination set ${name} ip_cidrs`, errors);
+      rejectDuplicates(suffixes, `destination set ${name} domain_suffixes`, errors);
     }
   }
 
@@ -71,31 +130,43 @@ export function validateConfig(config) {
   for (const source of config.sources) {
     if (!isObject(source)) continue;
     if (!['amneziawg2_container', 'linux_interface'].includes(source.type)) errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
-    if (source.type === 'amneziawg2_container' && (typeof source.container_name !== 'string' || source.container_name.length === 0)) {
+    if (source.type === 'amneziawg2_container') rejectUnknownKeys(source, amneziaSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+    if (source.type === 'linux_interface') rejectUnknownKeys(source, linuxSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+    if (source.type === 'amneziawg2_container' && !containerNamePattern.test(source.container_name ?? '')) {
       errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
     }
-    if (typeof source.interface !== 'string' || source.interface.length === 0) errors.push(`source ${source.tag ?? '<unknown>'} requires interface`);
-    if (!validCidr(source.client_subnet)) errors.push(`source ${source.tag ?? '<unknown>'} has an invalid client_subnet`);
+    if (!interfaceNamePattern.test(source.interface ?? '')) errors.push(`source ${source.tag ?? '<unknown>'} requires a valid Linux interface name`);
+    if (!isSingleHostIpv4Cidr(source.client_subnet)) errors.push(`source ${source.tag ?? '<unknown>'} client_subnet must be one IPv4 host (/32) in the MVP`);
   }
 
   for (const egress of config.egresses) {
     if (!isObject(egress)) continue;
     if (!['direct', 'tailscale_socks'].includes(egress.type)) errors.push(`egress ${egress.tag ?? '<unknown>'} has an unsupported type`);
+    if (egress.type === 'direct') rejectUnknownKeys(egress, directEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
+    if (egress.type === 'tailscale_socks') rejectUnknownKeys(egress, tailscaleEgressFields, `egress ${egress.tag ?? '<unknown>'}`, errors);
     if (egress.type === 'tailscale_socks') {
       if (!environmentNamePattern.test(egress.auth_key_env ?? '')) errors.push(`Tailscale egress ${egress.tag} requires auth_key_env, not a credential value`);
-      if (typeof egress.exit_node !== 'string' || egress.exit_node.length === 0) errors.push(`Tailscale egress ${egress.tag} requires exit_node`);
-      if (typeof egress.proxy_server !== 'string' || egress.proxy_server.length === 0) errors.push(`Tailscale egress ${egress.tag} requires proxy_server`);
+      if (!networkAddressPattern.test(egress.exit_node ?? '')) errors.push(`Tailscale egress ${egress.tag} requires exit_node`);
+      if (!networkAddressPattern.test(egress.proxy_server ?? '')) errors.push(`Tailscale egress ${egress.tag} requires proxy_server`);
       if (!Number.isInteger(egress.proxy_port) || egress.proxy_port < 1 || egress.proxy_port > 65535) errors.push(`Tailscale egress ${egress.tag} requires proxy_port`);
+      if (!validHttpsUrl(egress.healthcheck_url)) errors.push(`Tailscale egress ${egress.tag} requires a credential-free HTTPS healthcheck_url`);
     }
+  }
+  const directEgresses = config.egresses.filter((egress) => isObject(egress) && egress.type === 'direct');
+  const tailscaleEgresses = config.egresses.filter((egress) => isObject(egress) && egress.type === 'tailscale_socks');
+  if (directEgresses.length !== 1 || tailscaleEgresses.length !== 1) {
+    errors.push('the IPv4/TCP MVP requires exactly one direct and one tailscale_socks egress');
   }
 
   for (const policy of config.policies) {
     if (!isObject(policy)) continue;
+    rejectUnknownKeys(policy, policyFields, `policy ${policy.tag ?? '<unknown>'}`, errors);
     if (!sourceTags.has(policy.source)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown source`);
     if (!egressTags.has(policy.egress)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown egress`);
     if (!Array.isArray(policy.destination_sets) || policy.destination_sets.length === 0) {
       errors.push(`policy ${policy.tag ?? '<unknown>'} requires destination_sets`);
     } else {
+      rejectDuplicates(policy.destination_sets, `policy ${policy.tag ?? '<unknown>'} destination_sets`, errors);
       for (const destinationSet of policy.destination_sets) {
         if (destinationSet !== 'default' && !Object.hasOwn(config.destination_sets ?? {}, destinationSet)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown destination set: ${destinationSet}`);
       }
@@ -103,18 +174,45 @@ export function validateConfig(config) {
     if (!['block', 'direct'].includes(policy.failure_mode)) errors.push(`policy ${policy.tag ?? '<unknown>'} requires failure_mode block or direct`);
     const egress = config.egresses.find((candidate) => candidate.tag === policy.egress);
     if (policy.failure_mode === 'block' && egress?.type === 'direct') errors.push(`strict policy ${policy.tag ?? '<unknown>'} cannot use direct egress`);
+    if (policy.destination_sets?.includes('default') && policy.destination_sets.length !== 1) errors.push(`policy ${policy.tag ?? '<unknown>'} cannot combine default with another destination set`);
+    if (policy.failure_mode === 'direct' && !policy.destination_sets?.includes('default')) errors.push(`non-default policy ${policy.tag ?? '<unknown>'} cannot use failure_mode direct in the MVP`);
+  }
+
+  const strictPolicies = config.policies.filter((policy) => isObject(policy) && policy.failure_mode === 'block');
+  const defaultPolicies = config.policies.filter((policy) => isObject(policy) && policy.destination_sets?.length === 1 && policy.destination_sets[0] === 'default');
+  if (strictPolicies.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one strict policy');
+  if (defaultPolicies.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one default policy');
+
+  const strictPolicy = strictPolicies[0];
+  if (strictPolicy) {
+    if (strictPolicy.destination_sets?.includes('default')) errors.push(`strict policy ${strictPolicy.tag ?? '<unknown>'} cannot target default`);
+    const strictEgress = config.egresses.find((candidate) => candidate.tag === strictPolicy.egress);
+    if (strictEgress && strictEgress.type !== 'tailscale_socks') errors.push(`strict policy ${strictPolicy.tag ?? '<unknown>'} must use a tailscale_socks egress in the MVP`);
+  }
+
+  const defaultPolicy = defaultPolicies[0];
+  if (defaultPolicy) {
+    const defaultEgress = config.egresses.find((candidate) => candidate.tag === defaultPolicy.egress);
+    if (defaultPolicy.failure_mode !== 'direct' || defaultEgress?.type !== 'direct') errors.push(`default policy ${defaultPolicy.tag ?? '<unknown>'} must use a direct egress with failure_mode direct`);
+  }
+  if (strictPolicy && defaultPolicy && strictPolicy.source !== defaultPolicy.source) errors.push('strict and default policies must reference the same source');
+  const referencedEgresses = new Set(config.policies.filter(isObject).map((policy) => policy.egress));
+  for (const egress of config.egresses.filter(isObject)) {
+    if (!referencedEgresses.has(egress.tag)) errors.push(`egress ${egress.tag ?? '<unknown>'} is not referenced by a policy`);
   }
 
   const handling = config.traffic_handling;
   if (!isObject(handling)) {
     errors.push('traffic_handling must be an object');
   } else {
+    rejectUnknownKeys(handling, trafficHandlingFields, 'traffic_handling', errors);
     for (const key of ['udp_quic', 'ipv6']) {
-      if (!['reject', 'bypass', 'require_supported'].includes(handling[key])) errors.push(`traffic_handling.${key} must be explicit`);
+      if (handling[key] !== 'reject') errors.push(`traffic_handling.${key} must be reject in the IPv4/TCP MVP`);
     }
     if (!['managed', 'system'].includes(handling.dns_mode)) errors.push('traffic_handling.dns_mode must be managed or system');
-    if (config.policies.some((policy) => policy.failure_mode === 'block') && (handling.udp_quic === 'bypass' || handling.ipv6 === 'bypass')) {
-      errors.push('strict policies cannot use bypass for udp_quic or ipv6');
+    const hasStrictDomains = strictPolicies.some((policy) => (policy.destination_sets ?? []).some((name) => name !== 'default' && (config.destination_sets?.[name]?.domain_suffixes ?? []).length > 0));
+    if (hasStrictDomains && handling.dns_mode !== 'managed') {
+      errors.push('strict domain policies require traffic_handling.dns_mode managed');
     }
   }
 
@@ -122,13 +220,12 @@ export function validateConfig(config) {
   if (!isObject(resources)) {
     errors.push('resources must be an object');
   } else {
-    for (const key of ['nftables_table', 'routing_mark', 'routing_mask', 'route_table', 'rule_priority', 'service_name']) {
+    rejectUnknownKeys(resources, resourceFields, 'resources', errors);
+    for (const key of ['nftables_table', 'service_name']) {
       if (resources[key] === undefined || resources[key] === '') errors.push(`resources.${key} is required`);
     }
-    if (!Number.isInteger(resources.routing_mark) || resources.routing_mark < 1) errors.push('resources.routing_mark must be a positive integer');
-    if (!Number.isInteger(resources.routing_mask) || resources.routing_mask < 1) errors.push('resources.routing_mask must be a positive integer');
-    if (!Number.isInteger(resources.route_table) || resources.route_table < 1) errors.push('resources.route_table must be a positive integer');
-    if (!Number.isInteger(resources.rule_priority) || resources.rule_priority < 1) errors.push('resources.rule_priority must be a positive integer');
+    if (!nftablesTablePattern.test(resources.nftables_table ?? '')) errors.push('resources.nftables_table has an invalid name');
+    if (!serviceNamePattern.test(resources.service_name ?? '')) errors.push('resources.service_name has an invalid name');
   }
 
   return { valid: errors.length === 0, errors };

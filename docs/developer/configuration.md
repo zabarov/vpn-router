@@ -1,81 +1,127 @@
 # Configuration reference
 
-The router reads YAML configuration conforming to
-[`schema/config.schema.json`](../../schema/config.schema.json). The local
-validator checks structural and safety invariants; it does not make system
-changes.
+The YAML contract is published as
+[`schema/config.schema.json`](../../schema/config.schema.json). The custom
+validator adds semantic safety rules that JSON Schema cannot express compactly.
 
-## Required sections
+## Pre-alpha shape
 
-- `schema_version`: currently `1.0`.
-- `sources`: named VPN traffic sources.
-- `capture`: the transparent capture driver and its listener port.
-- `egresses`: named direct or Tailscale egress adapters.
-- `policies`: named route decisions.
-- `destination_sets`: named IPv4/IPv6 CIDR and/or domain-suffix sets referenced by non-default policies.
-- `traffic_handling`: explicit behavior for UDP/QUIC and IPv6.
-- `resources`: deployment-owned routing and state resources.
+`0.2.0-pre-alpha` requires:
 
-## Policy failure modes
+- exactly one active source;
+- exactly one direct and one `tailscale_socks` egress, both referenced;
+- exactly one strict policy with `failure_mode: block`;
+- exactly one default policy with `destination_sets: [default]`, a direct
+  egress, and `failure_mode: direct`;
+- the same source in both policies;
+- `traffic_handling.udp_quic: reject` and `traffic_handling.ipv6: reject`;
+- managed DNS whenever the strict policy contains domain suffixes.
 
-`failure_mode: block` is for traffic that must not leave through the direct
-path. `failure_mode: direct` is an explicit opt-in for a non-strict policy.
-There is no implicit fallback.
+Non-default `failure_mode: direct`, multiple strict regions, full client pools,
+IPv6 CIDRs, and alternate protocol behavior are rejected instead of being
+partially implemented.
 
-## Secrets
+## Sources
 
-Use an environment-variable name such as `VPN_ROUTER_TAILSCALE_AUTH_KEY`; do
-not put its value in YAML. The example configuration contains only names and
-non-routable documentation placeholders.
+### `amneziawg2_container`
 
-## Tailscale SOCKS egress
+Use this when the VPN interface lives inside an Amnezia Docker container:
 
-A `tailscale_socks` egress has two separate responsibilities:
+```yaml
+sources:
+  - tag: amnezia-in
+    type: amneziawg2_container
+    container_name: amnezia-awg2
+    interface: awg0
+    client_subnet: 10.8.1.2/32
+```
 
-- `proxy_server` and `proxy_port` identify the isolated SOCKS5 service that
-  the router connects to.
-- `auth_key_env` and `exit_node` are deployment inputs for that isolated
-  Tailscale service. They are not included in the generated sing-box file.
+`client_subnet` is an enforcement boundary, not documentation. The current
+validator accepts one IPv4 host only. Expanding to a pool before canary and
+rollback evidence requires a later explicit configuration version.
 
-`exit_node` must be a Tailscale IP address or a resolvable full hostname;
-short machine labels are not sufficient. The Tailscale container must keep its
-own network namespace. Do not run it with `network_mode:
-container:<amnezia-container>`.
+### `linux_interface`
 
-## AmneziaWG 2 source
+Use this for WireGuard, OpenVPN, IPsec, or another VPN whose interface is in the
+namespace where nftables and the capture process run:
 
-An `amneziawg2_container` source requires the Docker container name, the
-interface name (`awg0` for the first verified topology), and the client CIDR.
-The eventual runtime places the capture component in that container network
-namespace.
+```yaml
+sources:
+  - tag: generic-vpn
+    type: linux_interface
+    interface: wg0
+    client_subnet: 10.8.1.2/32
+```
 
-## Generic Linux interface source
+The provider-neutral generators support this adapter. The bundled managed
+lifecycle is currently limited to `amneziawg2_container`; a generic source
+still needs an operator-owned process supervisor in the same namespace.
 
-A `linux_interface` source requires only an interface name and client CIDR.
-It is for WireGuard, OpenVPN, IPsec, or another VPN implementation when the
-router's nftables and capture processes can run in the same Linux network
-namespace as that interface. It has no provider-specific container assumption.
+## Egresses
 
-This repository currently ships a Compose deployment adapter only for
-`amneziawg2_container`. A `linux_interface` deployment needs an
-operator-owned runtime adapter, but it uses the same validated policy,
-nftables, DNS, and egress contracts.
+A `tailscale_socks` egress declares the isolated userspace service:
 
-## Capture and destinations
+```yaml
+egresses:
+  - tag: regional-exit
+    type: tailscale_socks
+    auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
+    exit_node: regional-exit.example.ts.net
+    proxy_server: vpn-router-egress
+    proxy_port: 1055
+    healthcheck_url: https://example.com/
+```
 
-The initial runtime uses Linux TPROXY. `capture.listen_port` is the port that
-the owned nftables rules deliver to the router. It must not collide with a
-port already used inside the Amnezia container namespace.
+The YAML contains only the environment-variable name, never the auth-key
+value. For the managed Amnezia lifecycle, `proxy_server` must be
+`<resources.service_name>-egress`. `exit_node` must be a full hostname or IP,
+not an ambiguous short label.
+`healthcheck_url` must be a credential-free HTTPS URL that is expected to be
+reachable through the selected exit. Managed apply does not report success
+until this URL works through the actual SOCKS listener three consecutive times.
+The generated sing-box configuration uses Docker's local resolver without an
+internal DNS cache so the SOCKS service name can recover after a container
+restart instead of retaining a transient negative answer.
 
-Domain suffixes use lower-case ASCII, with IDN domains written as punycode. For
-example, the Russian suffix `.рф` is `.xn--p1ai`. A strict domain set is
-realized by dnsmasq: it observes client DNS, adds resolved IPv4 addresses to
-the router's owned nftables set, and only then allows the capture rule to send
-that traffic to the selected egress. This keeps non-selected TCP traffic out
-of the sidecar.
+## Destination sets
 
-With `dns_mode: managed`, the generated nftables policy redirects client DNS
-on the source interface to dnsmasq port 5353. Encrypted DNS and direct-IP
-connections do not carry a domain suffix and are therefore not classified by
-this first adapter. QUIC is rejected in strict profiles so that a browser can
-retry via TCP/TLS, where DNS-derived classification is enforceable.
+Sets may contain IPv4 CIDRs, lower-case ASCII domain suffixes, or both:
+
+```yaml
+destination_sets:
+  regional-services:
+    domain_suffixes:
+      - .ru
+      - .xn--p1ai
+      - .su
+    ip_cidrs:
+      - 192.0.2.0/24
+```
+
+Use punycode for internationalized names. This list does not mean "all services
+from a country." Add services on `.com`, `.net`, or another suffix explicitly.
+An IP learned for one selected hostname can also serve unrelated names on a
+shared CDN, so strict profiles need acceptance testing.
+
+## Managed DNS limitations
+
+The generated rules redirect plain client DNS on TCP/UDP port 53 to dnsmasq
+port 5353 for the configured `/32`. dnsmasq populates the owned IPv4 nftables
+set before returning the answer. DNS TTL and dnsmasq cache lifetime are capped
+at 300 seconds. Dynamic nftables
+entries remain for ten minutes, providing a full cache-lifetime overlap so a
+cached answer cannot create a direct-routing gap at set expiry.
+
+DoH, DoT, browser Secure DNS, ECH, direct-IP connections, applications with a
+private resolver, and cached addresses learned before apply bypass suffix
+observation. Guaranteed strict mode therefore requires system DNS and an empty
+client DNS cache at canary start. They are documented limitations, not silent
+fallbacks.
+
+## Owned resources
+
+`resources` declares one nftables table and a service-name prefix. Values must
+not collide with an existing deployment. The redirect runtime deliberately
+does not install policy rules, packet marks, or route tables. The lifecycle
+refuses an unowned collision and stores its root-only manifest under
+`/var/lib/<service_name>/runtime/`.

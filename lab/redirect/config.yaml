@@ -1,0 +1,47 @@
+schema_version: "1.0"
+
+sources:
+  - tag: lab-source
+    type: linux_interface
+    interface: awg0
+    client_subnet: 10.8.1.2/32
+
+capture:
+  type: redirect
+  listen_port: 12345
+
+egresses:
+  - tag: direct
+    type: direct
+  - tag: strict-egress
+    type: tailscale_socks
+    auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
+    exit_node: exit.example.ts.net
+    proxy_server: socks-egress
+    proxy_port: 1080
+    healthcheck_url: https://example.com/
+
+policies:
+  - tag: strict
+    source: lab-source
+    destination_sets: [strict-target]
+    egress: strict-egress
+    failure_mode: block
+  - tag: default
+    source: lab-source
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  strict-target:
+    domain_suffixes: [.test]
+
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+
+resources:
+  nftables_table: vpn_router_lab
+  service_name: vpn-router-lab

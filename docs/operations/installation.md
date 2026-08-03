@@ -1,9 +1,31 @@
-# Installation and safety boundaries
+# Installation and lifecycle
 
-The current pre-alpha package validates configuration locally. It does not yet
-include a production installer.
+## Prerequisites
 
-Before a gated rollout, make the deployment package with one command:
+The managed AmneziaWG2 adapter requires:
+
+- a Linux host with systemd;
+- Docker Engine and Compose plugin with network gateway-priority support;
+- Node.js 22 or newer;
+- an existing, healthy AmneziaWG2 container and `awg0` interface;
+- `/dev/net/tun` for an isolated client test;
+- a Tailscale exit node that is online and allowed by Tailnet policy;
+- a unique test-client IPv4 address expressed as `/32`.
+
+Do not use the operator's own workstation as the first test client.
+
+## Local validation
+
+```sh
+npm ci
+npm test
+npm run validate
+./lab/verify.sh
+./lab/redirect/verify.sh
+```
+
+Render and container-check the private deployment configuration without
+contacting a server:
 
 ```sh
 ./scripts/prepare-amneziawg2-artifacts.sh \
@@ -11,23 +33,109 @@ Before a gated rollout, make the deployment package with one command:
   --output-dir ./build/vpn-router
 ```
 
-It renders the sing-box, nftables, and dnsmasq files and validates each against
-the pinned local container checks. It does not contact or modify a server.
+The command checks sing-box, nftables, and dnsmasq against pinned images. The
+output directory is local deployment material and must not be committed.
 
-For a managed domain policy, the deployment package builds a small dnsmasq
-sidecar from `deploy/dnsmasq/Dockerfile`. The image must be built and its
-configuration checked before the live gate. Do not substitute an arbitrary
-dnsmasq image: support for the `nftset` directive is required.
+## Native AmneziaWG2 client test
 
-Before a future live installation, the operator must:
+An Amnezia `vpn://` profile is sufficient when it embeds the native AWG2
+configuration. On a separate Linux host:
 
-1. Validate the configuration locally.
-2. Record exactly which host files, Docker objects, nftables resources, routes,
-   DNS settings, and Tailscale objects may change.
-3. Create a timestamped backup of each affected resource.
-4. Prepare and test a rollback procedure in a disposable environment.
-5. Confirm a change window, SSH recovery path, smoke plan, and stop conditions.
+```sh
+sudo ./scripts/run-isolated-amneziawg2-client.sh \
+  --input ./client-profile.vpn
+```
 
-Never assume that a VPN container, route table, nftables table, or Tailscale
-node is owned by this project unless it is explicitly declared in the
-configuration and deployment plan.
+The runner creates a mode-`0600` native profile in a private temporary
+directory, starts the pinned `amneziavpn/amneziawg-go` image without host
+networking or `--privileged`, and removes the container and extracted profile.
+It never prints profile contents. Delete the original transferred `.vpn` file
+after the result has been recorded.
+
+When Node.js is intentionally absent on the isolated host, extract locally and
+transfer only the mode-`0600` native file, then use
+`--native-config ./awg0.conf`. Delete the transferred file immediately after
+the runner exits.
+
+## Prepare the live configuration
+
+Copy `config.example.yaml` outside Git. Set:
+
+- the real Amnezia container and interface names;
+- the test client's single `/32` address;
+- a unique `resources.service_name` and nftables table;
+- the Tailscale exit-node full hostname or IP;
+- `proxy_server` to `<service_name>-egress`.
+- a credential-free HTTPS `healthcheck_url` that is reachable through the
+  selected exit.
+
+For first enrollment, export the auth key only in the root session:
+
+```sh
+export VPN_ROUTER_TAILSCALE_AUTH_KEY='set-in-a-secret-manager-or-root-session'
+```
+
+The lifecycle immediately recreates a newly enrolled egress with the persisted
+state and an empty `TS_AUTHKEY`, then verifies the container environment. Also
+remove the key from the invoking root shell after the command returns. State is
+persisted under `/var/lib/<service_name>/egress-tailscale/`.
+
+## Lifecycle commands
+
+Run preflight first. It is read-only with respect to host routes, firewall,
+containers, and networks; its validation containers are disposable.
+
+```sh
+sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
+  ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
+```
+
+Apply always requires a server-side rollback timeout:
+
+```sh
+sudo --preserve-env=VPN_ROUTER_TAILSCALE_AUTH_KEY \
+  ./scripts/vpn-router-lifecycle.sh apply \
+  --config ./router.yaml \
+  --rollback-after 600
+```
+
+The lifecycle stores a root-only baseline, generated artifacts, copied config,
+checksums, and ownership manifest below `/var/lib/<service_name>/runtime/`.
+It refuses pre-existing names or the configured nftables table without a
+matching active manifest.
+
+Check local state without cancelling the deadman:
+
+```sh
+sudo ./scripts/vpn-router-lifecycle.sh status --config ./router.yaml
+sudo ./scripts/vpn-router-lifecycle.sh verify --config ./router.yaml
+```
+
+Only after the external acceptance matrix passes, cancel the timer:
+
+```sh
+sudo ./scripts/vpn-router-lifecycle.sh verify \
+  --config ./router.yaml \
+  --cancel-deadman
+```
+
+Rollback is idempotent:
+
+```sh
+sudo ./scripts/vpn-router-lifecycle.sh rollback --config ./router.yaml
+```
+
+It preserves the Tailscale state directory and the existing AmneziaWG2
+container. A recreated source container invalidates verification; re-run
+preflight and apply after confirming the new namespace.
+
+While a manifest is active, all lifecycle commands require the exact config
+revision recorded at apply time. If the operator copy changed, use the
+root-only `/var/lib/<service_name>/runtime/config.yaml` to verify or roll back.
+
+## Current deployment boundary
+
+`linux_interface` is fully supported by validation and artifact generation, but
+the bundled managed lifecycle does not yet install host-network processes for
+that adapter. Treat a generic-interface deployment as an operator-owned runtime
+until a separate lifecycle adapter is released and proven.

@@ -11,11 +11,13 @@ usage() {
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --container)
-      container_name="${2-}"
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      container_name=$2
       shift 2
       ;;
     --interface)
-      interface_name="${2-}"
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      interface_name=$2
       shift 2
       ;;
     -h|--help)
@@ -31,6 +33,15 @@ done
 
 if [ -z "$container_name" ]; then
   usage
+  exit 2
+fi
+
+if ! printf '%s\n' "$container_name" | grep -Eq '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$'; then
+  echo 'FAIL: invalid Docker container name' >&2
+  exit 2
+fi
+if ! printf '%s\n' "$interface_name" | grep -Eq '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$'; then
+  echo 'FAIL: invalid Linux interface name' >&2
   exit 2
 fi
 

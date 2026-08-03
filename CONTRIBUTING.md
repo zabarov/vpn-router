@@ -10,7 +10,10 @@ Thank you for helping improve VPN Router.
 - Keep provider-specific behavior in an adapter contract; do not hard-code a
   country, provider, or private deployment into the core.
 - Preserve strict-policy fail-closed behavior.
-- Run `npm test` and `npm run validate`.
+- Keep the first runtime scope at one IPv4 `/32`; wider client pools need a new
+  reviewed contract and acceptance evidence.
+- Run `npm run check` and `npm run check:containers`. CI repeats both suites on
+  every proposed change.
 
 ## Change scope
 

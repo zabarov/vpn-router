@@ -9,12 +9,18 @@ import { generateNftablesConfig } from '../src/nftables-generator.mjs';
 import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq> --config <path>';
+  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq|render-runtime-env> --config <path>';
+}
+
+function shellQuote(value) {
+  const text = String(value);
+  if (text.includes('\0')) throw new Error('runtime values cannot contain NUL bytes');
+  return `'${text.replaceAll("'", `'"'"'`)}'`;
 }
 
 async function main(argv) {
   const [command, option, configPath, ...extraArgs] = argv;
-  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq'].includes(command) || option !== '--config' || !configPath || extraArgs.length > 0) {
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq', 'render-runtime-env'].includes(command) || option !== '--config' || !configPath || extraArgs.length > 0) {
     throw new Error(usage());
   }
 
@@ -38,6 +44,28 @@ async function main(argv) {
   }
   if (command === 'render-dnsmasq') {
     process.stdout.write(generateDnsmasqConfig(document.toJS()));
+    return;
+  }
+  if (command === 'render-runtime-env') {
+    const config = document.toJS();
+    const source = config.sources[0];
+    const strictPolicy = config.policies.find((policy) => policy.failure_mode === 'block');
+    const strictEgress = config.egresses.find((egress) => egress.tag === strictPolicy.egress);
+    const fields = {
+      SOURCE_TYPE: source.type,
+      SOURCE_CONTAINER: source.container_name ?? 'none',
+      SOURCE_INTERFACE: source.interface,
+      CLIENT_SUBNET: source.client_subnet,
+      STRICT_EGRESS_TAG: strictEgress.tag,
+      TAILSCALE_AUTH_KEY_ENV: strictEgress.auth_key_env,
+      TAILSCALE_EXIT_NODE: strictEgress.exit_node,
+      TAILSCALE_PROXY_SERVER: strictEgress.proxy_server,
+      TAILSCALE_PROXY_PORT: strictEgress.proxy_port,
+      TAILSCALE_HEALTHCHECK_URL: strictEgress.healthcheck_url,
+      NFTABLES_TABLE: config.resources.nftables_table,
+      SERVICE_NAME: config.resources.service_name
+    };
+    for (const [key, value] of Object.entries(fields)) process.stdout.write(`${key}=${shellQuote(value)}\n`);
     return;
   }
   process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS()), null, 2)}\n`);

@@ -18,17 +18,16 @@ Run it on a Docker host:
 
 ```sh
 ./lab/verify.sh
-docker compose -f lab/compose.yaml down --volumes
 ```
 
 Expected result:
 
 ```text
-PASS: sidecar captured 10.8.1.2 traffic on awg0 before NAT.
+PASS: sidecar captured 10.8.1.2 traffic on awg0 before NAT and cleanup completed.
 ```
 
-This proves the pre-NAT capture boundary, but it does not yet prove TPROXY
-interception, DNS policy, selected egress, or fail-closed behavior.
+This proves the pre-NAT capture boundary, but it does not yet prove managed TCP
+redirection, DNS policy, selected egress, or fail-closed behavior.
 
 ## Tailscale configuration syntax check
 
@@ -44,8 +43,8 @@ docker run --rm \
 This verifies configuration syntax only. A real exit-node test needs a
 user-owned Tailnet node and an enrollment method.
 
-## TPROXY fail-closed proof
+## TCP redirect fail-closed proof
 
-[The TPROXY lab](tproxy/README.md) routes a packet through a running sidecar,
-then stops that sidecar and verifies that the strict destination does not leak
-through the direct path.
+[The TCP redirect lab](redirect/README.md) routes a packet through a running
+sidecar, then stops that sidecar and verifies that the strict destination does
+not leak through the direct path.

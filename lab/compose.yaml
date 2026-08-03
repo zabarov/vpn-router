@@ -1,6 +1,8 @@
+name: vpn-router-namespace-lab
+
 services:
   source:
-    image: alpine:3.21
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     command:
       - /bin/sh
       - -ec
@@ -27,11 +29,16 @@ services:
         ipv4_address: 172.30.10.10
 
   sidecar:
-    image: alpine:3.21
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     command: ["/bin/sh", "-ec", "apk add --no-cache tcpdump; exec sleep infinity"]
     network_mode: service:source
     cap_add:
       - NET_RAW
+    healthcheck:
+      test: ["CMD-SHELL", "command -v tcpdump >/dev/null 2>&1 && ip link show dev awg0 >/dev/null 2>&1"]
+      interval: 1s
+      timeout: 1s
+      retries: 90
     depends_on:
       source:
         condition: service_healthy

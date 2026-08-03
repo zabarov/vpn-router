@@ -1,76 +1,81 @@
-# Deployment contract
-
-This document defines the future production boundary. It is not an instruction
-to apply changes to a running server without the live validation gate.
+# Deployment ownership and rollback contract
 
 ## Generated artifacts
 
-From one validated YAML configuration, generate:
+One validated YAML file produces:
 
 ```sh
-node bin/vpn-router.mjs render-sing-box --config ./router.yaml > ./sing-box.json
-node bin/vpn-router.mjs render-nftables --config ./router.yaml > ./vpn-router.nft
-node bin/vpn-router.mjs render-dnsmasq --config ./router.yaml > ./dnsmasq.conf
+node bin/vpn-router.mjs render-sing-box --config ./router.yaml
+node bin/vpn-router.mjs render-nftables --config ./router.yaml
+node bin/vpn-router.mjs render-dnsmasq --config ./router.yaml
+node bin/vpn-router.mjs render-runtime-env --config ./router.yaml
 ```
 
-The generated sing-box file never contains a Tailscale credential. A one-time
-Tailscale auth key belongs only in the deployment environment for
-`vpn-router-egress`, which runs in its own Docker network namespace. Persist
-its state directory outside the repository and remove the auth key from the
-deployment environment after successful enrollment; the Compose template
-accepts an empty `TS_AUTHKEY` when an enrolled state directory already
-exists. Never commit either the state directory or a file containing an auth
-key.
+The first three outputs contain no Tailscale auth key. `render-runtime-env`
+contains validated topology identifiers only and is consumed by the lifecycle;
+it never emits the credential value.
 
 ## Owned resources
 
-The configuration owns only these resources:
+A managed deployment owns only:
 
-- one nftables table named by `resources.nftables_table`;
-- the routing mark, mask, route table, and rule priority declared under
-  `resources`;
-- the capture, DNS, and isolated egress service names declared by the
-  deployment;
-- the state directories mounted into those services.
+- `table inet <resources.nftables_table>`;
+- containers `<service_name>`, `<service_name>-dns`, and
+  `<service_name>-egress`;
+- Docker networks `<service_name>-control` and `<service_name>-proxy`;
+- `/var/lib/<service_name>/`.
 
-It must never flush the global nftables ruleset, alter Docker's own tables, or
-replace the host default route.
+The source AmneziaWG2 container is borrowed, not owned. Connecting it to the
+internal proxy network is recorded separately and uses negative gateway
+priority. The lifecycle compares its default-route fingerprint before and
+after that connection.
 
-## Apply order for a future gated rollout
+The internal proxy network has no host-published port. Only the source
+namespace and Tailscale egress join it. Tailscale also joins a separate control
+network and runs in userspace mode.
 
-1. Record the current owned-resource state and save a timestamped backup.
-2. Start and smoke-test the isolated Tailscale SOCKS egress by itself. It must
-   use the shared Docker network, not the Amnezia container namespace.
-3. Run `nft -c -f ./vpn-router.nft` and `sing-box check -c ./sing-box.json`.
-4. Create the local policy route for the configured mark and route table.
-5. Apply only the generated nftables table.
-6. Start the capture and DNS sidecars with the source container explicitly
-   named in the compose environment.
-7. Run the smoke plan. Stop and restore the backup if any strict destination
-   reaches the direct path.
+## Apply transaction
 
-## Rollback order
+1. Validate config, interface, source container, IPv4-only boundary, names, and
+   absent-or-managed resources.
+2. Render and syntax-check sing-box, nftables, and dnsmasq.
+3. Build the pinned dnsmasq image and validate its configuration.
+4. Capture a root-only baseline, write an `applying` ownership manifest, and
+   arm the server-owned rollback deadman before the first network mutation.
+5. Start only Tailscale and require a running backend, an online selected exit,
+   and a successful Tailnet ping to that exit. After first enrollment, recreate
+   the egress from its persisted state with an empty `TS_AUTHKEY`, then verify
+   that the credential is absent from the container environment.
+6. Connect the source to the internal proxy network without changing its
+   default route, then prove both the SOCKS port and the configured HTTPS
+   health check through SOCKS.
+7. Apply the one owned nftables table. No policy rule or route table is added.
+8. Start DNS and capture sidecars, verify every owned component, and mark the
+   manifest `applied`.
 
-1. Stop and remove only the capture and DNS sidecars.
-2. Delete only the policy rule and route table entries declared in the
-   configuration.
-3. Delete only `table inet <resources.nftables_table>`.
-4. Stop and remove the isolated egress service only if the deployment itself is
-   being removed; it never shares the Amnezia network namespace.
-5. Restore the recorded backup if the owned-resource state differs from its
-   pre-change value.
-6. Confirm AmneziaWG connectivity and direct traffic before closing the change.
+Any failure after the intent manifest triggers rollback. Repeating `apply` with
+the exact verified configuration is a no-op except for rearming the deadman.
+An active manifest rejects a changed configuration; use its root-only stored
+copy for verification or rollback before applying a new revision.
 
-## Compose template
+## Rollback transaction
 
-`deploy/compose.amneziawg2.yaml` deliberately uses
-`network_mode: container:<source>`. This makes the sidecar see `awg0` before
-NAT. It also means that a replacement of the source container requires a
-sidecar restart and renewed health check.
+1. Stop and remove the capture and DNS sidecars.
+2. If the source container ID still matches the manifest, delete the one owned
+   nftables table and proxy-network connection.
+3. Remove the project Compose objects, including the Tailscale container and
+   two project networks.
+4. Keep `/var/lib/<service_name>/egress-tailscale/` intact.
+5. Compare host and source addresses, routes, policy rules, and the recorded SSH
+   route with the pre-apply snapshots. The owned nftables table must be absent;
+   full ruleset bytes are not compared because unrelated packet counters move.
+6. Mark the root-only manifest `rolled_back` only after those checks pass.
 
-The template must be invoked with an explicit source container name, the
-Docker network shared by the Amnezia container and the isolated Tailscale
-egress sidecar, and a local generated configuration path. For a managed domain policy it also needs
-`VPN_ROUTER_DNSMASQ_CONFIG`; the DNS sidecar shares the VPN source namespace
-and has `NET_ADMIN` solely to update this project's named nftables sets. It
-contains neither a server hostname nor a credential.
+If the source container was recreated, its old namespace no longer exists; the
+lifecycle will not delete similarly named resources from the new namespace.
+Rollback is safe to repeat. It returns `ALREADY_ROLLED_BACK` for a verified
+completed rollback and `ALREADY_ABSENT` when no manifest exists.
+
+The lifecycle never flushes the global nftables ruleset, changes the host
+default route or DNS, deletes unrelated Docker resources, modifies the
+AmneziaWG2 profile, or removes Tailscale state.

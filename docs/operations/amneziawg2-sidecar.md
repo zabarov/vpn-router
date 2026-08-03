@@ -1,55 +1,61 @@
-# AmneziaWG 2 sidecar deployment model
+# AmneziaWG2 adapter
 
-## Why the router joins the container namespace
+## Why capture runs in the source namespace
 
-The reference AmneziaWG 2 layout keeps `awg0` and VPN client addresses inside
-the Amnezia Docker container. NAT then changes those source addresses before
-the host can inspect them. A host-only router therefore cannot reliably apply
-client-subnet policy.
+AmneziaWG2 normally keeps `awg0` and VPN client addresses inside its Docker
+container. NAT can erase the original client address before traffic reaches the
+host. The DNS and sing-box sidecars therefore use
+`network_mode: container:<source>` and see pre-NAT packets.
 
-The capture and DNS sidecars join the existing Amnezia container network
-namespace. The Tailscale exit sidecar deliberately does not: it joins the same
-Docker network as Amnezia but keeps its own network namespace and exposes a
-userspace SOCKS5 listener. The router sends only selected traffic to that
-listener. This separation prevents an exit-node route from replacing the
-Amnezia namespace default route.
+Tailscale is deliberately different: it stays in its own userspace-networking
+container. The source container receives access only to a project-owned
+internal SOCKS network. This avoids the unsupported design in which two VPNs
+compete for one namespace's default route.
 
-## Read-only preflight
-
-Run this before preparing any deployment. It does not change Docker, firewall,
-routes, DNS, or the VPN container:
+## Read-only topology check
 
 ```sh
-./scripts/preflight-amneziawg2.sh --container amnezia-awg2
+./scripts/preflight-amneziawg2.sh \
+  --container amnezia-awg2 \
+  --interface awg0
 ```
 
-The command confirms that the named container is running and that `awg0`
-exists with an IPv4 address inside that namespace. A different container or
-interface name is supported explicitly:
+The managed lifecycle performs stricter checks: one `/32`, no global IPv6 on
+the interface, required `ip`/`nft` tools, collision-free owned resources,
+available Tailscale enrollment, and a rollback deadman.
 
-```sh
-./scripts/preflight-amneziawg2.sh --container <name> --interface <name>
-```
+## Import-key handling
 
-## Lifecycle requirement
+The official Amnezia `vpn://` text key can contain a nested native AWG2
+configuration. `scripts/extract-amneziawg2-profile.mjs` decodes the Qt-compressed
+payload, finds the native profile, verifies AWG2 `S3`/`S4` fields, removes only
+empty optional `I1`-`I5` lines rejected by native tools, and creates a new
+mode-`0600` file. It refuses overwrite and never prints the profile.
+Profiles containing `wg-quick` command hooks or persistence directives are
+rejected. The isolated runner also removes profile-supplied DNS and routing
+table directives before starting the disposable namespace.
 
-`network_mode: container:<name>` binds the sidecar to the current target
-container namespace. If the Amnezia container is recreated, the sidecar must
-be restarted against the new namespace. A production deployment therefore
-needs an independent supervisor and a health check that fails if the source
-container or `awg0` disappears.
+The isolated client runner uses the pinned
+`amneziavpn/amneziawg-go:3.0.3` digest. It does not use host networking or
+`--privileged`; only `/dev/net/tun`, `NET_ADMIN`, and `NET_RAW` are granted.
 
-## Deployment gate
+## Recreation behavior
 
-Do not deploy merely because this preflight passes. The operator still needs a
-Tailscale enrollment method, selected exit node, resource ownership map,
-backup, rollback, change window, and end-to-end smoke plan. See
-[the live validation gate](live-validation.md).
+Docker binds `network_mode: container:<name>` to one container namespace. If
+the source container is recreated, lifecycle verification fails on container
+ID mismatch. The old namespace and its rules disappear; do not apply anything
+to the new namespace until preflight, baseline, and canary are repeated.
 
-## Current validation status
+## Validation status
 
-The namespace layout and isolated Tailscale SOCKS egress have been observed on
-a real AmneziaWG 2 host. Client acceptance of the TPROXY capture path is not
-yet proven: a live experiment interrupted VPN-client connectivity and was
-fully rolled back. Reproduce the packet path in a disposable namespace lab and
-prove client connectivity before treating this adapter as deployable.
+The disposable lab proves source `/32` matching, managed-DNS first-attempt
+selection, TCP-redirect and SOCKS dependency, fail-closed behavior for both
+outages, direct-path continuity, out-of-scope-client isolation, timeout expiry,
+and full cleanup. Native Linux and live canary results must still be recorded
+for each deployment; no generic lab result makes a host production-ready.
+
+## Upstream references
+
+- [Amnezia text-key import](https://docs.amnezia.org/documentation/instructions/connect-via-text-key/)
+- [AmneziaWG protocol parameters](https://docs.amnezia.org/documentation/amnezia-wg/)
+- [amneziawg-go releases](https://github.com/amnezia-vpn/amneziawg-go/releases)

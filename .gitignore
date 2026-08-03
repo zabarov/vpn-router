@@ -6,7 +6,12 @@
 !.env.example
 source/
 output/
+build/
+private/
 node_modules/
+*.vpn
+*.key
+*.pem
 *.bak
 *.bak_*
 *.bak-*

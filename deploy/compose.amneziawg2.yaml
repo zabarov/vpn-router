@@ -1,47 +1,69 @@
 services:
   vpn-router-egress:
-    image: tailscale/tailscale:stable
+    image: tailscale/tailscale:stable@sha256:cdf5612ded5be1344f1a704b8c5e53496db97376bb533e5e15f141e48bf60cc0
     container_name: ${VPN_ROUTER_EGRESS_SERVICE_NAME:-vpn-router-egress}
     hostname: ${VPN_ROUTER_EGRESS_SERVICE_NAME:-vpn-router-egress}
     restart: unless-stopped
     environment:
       # Required only for first enrollment. Once state exists, keep this unset.
       TS_AUTHKEY: ${VPN_ROUTER_TAILSCALE_AUTH_KEY:-}
-      TS_EXTRA_ARGS: --exit-node=${VPN_ROUTER_TAILSCALE_EXIT_NODE:?Set VPN_ROUTER_TAILSCALE_EXIT_NODE}
+      TS_EXTRA_ARGS: --exit-node=${VPN_ROUTER_TAILSCALE_EXIT_NODE:?Set VPN_ROUTER_TAILSCALE_EXIT_NODE} --exit-node-allow-lan-access=false --accept-routes=false --accept-dns=false
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
-      TS_SOCKS5_SERVER: 0.0.0.0:1055
+      TS_SOCKS5_SERVER: 0.0.0.0:${VPN_ROUTER_TAILSCALE_PROXY_PORT:-1055}
+      TS_AUTH_ONCE: "true"
     volumes:
       - ${VPN_ROUTER_EGRESS_STATE_DIRECTORY:-/var/lib/vpn-router/egress-tailscale}:/var/lib/tailscale
     networks:
-      - egress_network
+      control_network:
+        gw_priority: 1
+      proxy_network:
+        gw_priority: -1
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
   vpn-router-dns:
     build:
       context: ./dnsmasq
-    image: vpn-router-dns:0.1
+    image: vpn-router-dns:0.2.0-pre-alpha
     container_name: ${VPN_ROUTER_DNS_SERVICE_NAME:-vpn-router-dns}
     network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
     restart: unless-stopped
+    cap_drop:
+      - ALL
     cap_add:
       - NET_ADMIN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ${VPN_ROUTER_DNSMASQ_CONFIG:?Set VPN_ROUTER_DNSMASQ_CONFIG}:/etc/dnsmasq.conf:ro
 
   vpn-router:
-    image: ghcr.io/sagernet/sing-box:v1.13.12
+    image: ghcr.io/sagernet/sing-box:v1.13.12@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
     container_name: ${VPN_ROUTER_SERVICE_NAME:-vpn-router}
     network_mode: "container:${VPN_ROUTER_SOURCE_CONTAINER:?Set VPN_ROUTER_SOURCE_CONTAINER}"
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ${VPN_ROUTER_SING_BOX_CONFIG:?Set VPN_ROUTER_SING_BOX_CONFIG}:/etc/sing-box/config.json:ro
-      - ${VPN_ROUTER_STATE_DIRECTORY:-/var/lib/vpn-router/tailscale}:/var/lib/vpn-router/tailscale
     command: ["-C", "/etc/sing-box", "run"]
 
 networks:
-  egress_network:
-    external: true
-    name: ${VPN_ROUTER_EGRESS_NETWORK:?Set VPN_ROUTER_EGRESS_NETWORK to the Amnezia container network}
+  control_network:
+    name: ${VPN_ROUTER_CONTROL_NETWORK:-vpn-router-control}
+    labels:
+      io.github.rim.vpn-router.owner: ${VPN_ROUTER_SERVICE_NAME:-vpn-router}
+      io.github.rim.vpn-router.purpose: tailscale-control
+  proxy_network:
+    name: ${VPN_ROUTER_PROXY_NETWORK:-vpn-router-proxy}
+    internal: true
+    labels:
+      io.github.rim.vpn-router.owner: ${VPN_ROUTER_SERVICE_NAME:-vpn-router}
+      io.github.rim.vpn-router.purpose: socks-egress
