@@ -122,13 +122,23 @@ test('rollback verifies absence before reporting success', async () => {
   const rollbackStart = source.indexOf('rollback_command()');
   const rollbackEnd = source.indexOf('apply_command()', rollbackStart);
   const rollback = source.slice(rollbackStart, rollbackEnd);
-  assert.match(rollback, /owned_table_exists && rollback_ok=false/);
-  assert.match(rollback, /container_exists "\$name" && rollback_ok=false/);
+  assert.match(rollback, /wait_for_owned_runtime_absent \|\| rollback_ok=false/);
   assert.match(rollback, /write_manifest rollback_failed/);
   assert.match(rollback, /cancel_deadman_timer/);
   assert.match(rollback, /rollback=ALREADY_ROLLED_BACK/);
-  assert.match(rollback, /if container_exists "\$CAPTURE_NAME" \|\| container_exists "\$DNS_NAME"/);
-  assert.match(rollback, /verify_baseline_restored \|\| rollback_ok=false/);
+  assert.match(rollback, /if container_exists "\$CAPTURE_NAME"/);
+  assert.match(rollback, /compose stop vpn-router >\/dev\/null/);
+  assert.match(rollback, /if container_exists "\$DNS_NAME"/);
+  assert.match(rollback, /compose stop vpn-router-dns >\/dev\/null/);
+  assert.match(rollback, /wait_for_baseline_restored \|\| rollback_ok=false/);
+});
+
+test('rollback tolerates bounded asynchronous resource and route cleanup', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  assert.match(source, /wait_for_owned_runtime_absent\(\)/);
+  assert.match(source, /for _attempt in \{1[.]\.20\}/);
+  assert.match(source, /wait_for_baseline_restored\(\)/);
+  assert.match(source, /for _attempt in \{1[.]\.10\}/);
 });
 
 test('rollback compares stable network semantics instead of expiring lease timers', async () => {

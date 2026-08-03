@@ -186,6 +186,38 @@ owned_table_exists() {
   source_exec nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1
 }
 
+owned_runtime_absent() {
+  local name
+  ! owned_table_exists || return 1
+  ! source_on_proxy_network || return 1
+  for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
+    ! container_exists "$name" || return 1
+  done
+  if uses_managed_tailscale; then
+    for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
+      ! docker network inspect "$name" >/dev/null 2>&1 || return 1
+    done
+  fi
+}
+
+wait_for_owned_runtime_absent() {
+  local _attempt
+  for _attempt in {1..20}; do
+    owned_runtime_absent && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+wait_for_baseline_restored() {
+  local _attempt
+  for _attempt in {1..10}; do
+    verify_baseline_restored && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
 file_sha256() {
   sha256sum "$1" | awk '{print $1}'
 }
@@ -589,31 +621,24 @@ rollback_command() {
   local rollback_ok=true current_source_id name
 
   if [[ "$MANIFEST_STATUS" == rolled_back || "$MANIFEST_STATUS" == disabled ]]; then
-    if ! owned_table_exists && ! source_on_proxy_network; then
-      local runtime_absent=true
-      for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
-        container_exists "$name" && runtime_absent=false
-      done
-      if uses_managed_tailscale; then
-        for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
-          docker network inspect "$name" >/dev/null 2>&1 && runtime_absent=false
-        done
+    if owned_runtime_absent; then
+      if [[ "$deadman_call" != true ]]; then cancel_deadman_timer; fi
+      if [[ "$command_name" == disable ]]; then
+        echo 'disable=ALREADY_DISABLED'
+      else
+        echo 'rollback=ALREADY_ROLLED_BACK'
       fi
-      if [[ "$runtime_absent" == true ]]; then
-        if [[ "$deadman_call" != true ]]; then cancel_deadman_timer; fi
-        if [[ "$command_name" == disable ]]; then
-          echo 'disable=ALREADY_DISABLED'
-        else
-          echo 'rollback=ALREADY_ROLLED_BACK'
-        fi
-        return 0
-      fi
+      return 0
     fi
   fi
 
-  if container_exists "$CAPTURE_NAME" || container_exists "$DNS_NAME"; then
-    compose stop vpn-router vpn-router-dns >/dev/null 2>&1 || rollback_ok=false
-    compose rm -f vpn-router vpn-router-dns >/dev/null 2>&1 || rollback_ok=false
+  if container_exists "$CAPTURE_NAME"; then
+    compose stop vpn-router >/dev/null 2>&1 || rollback_ok=false
+    compose rm -f vpn-router >/dev/null 2>&1 || rollback_ok=false
+  fi
+  if container_exists "$DNS_NAME"; then
+    compose stop vpn-router-dns >/dev/null 2>&1 || rollback_ok=false
+    compose rm -f vpn-router-dns >/dev/null 2>&1 || rollback_ok=false
   fi
 
   current_source_id=$(source_id 2>/dev/null || true)
@@ -632,18 +657,9 @@ rollback_command() {
 
   compose down --remove-orphans >/dev/null 2>&1 || rollback_ok=false
 
+  wait_for_owned_runtime_absent || rollback_ok=false
   if [[ -n "$current_source_id" && "$current_source_id" == "$MANIFEST_SOURCE_ID" ]]; then
-    owned_table_exists && rollback_ok=false
-    source_on_proxy_network && rollback_ok=false
-    verify_baseline_restored || rollback_ok=false
-  fi
-  for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
-    container_exists "$name" && rollback_ok=false
-  done
-  if uses_managed_tailscale; then
-    for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
-      docker network inspect "$name" >/dev/null 2>&1 && rollback_ok=false
-    done
+    wait_for_baseline_restored || rollback_ok=false
   fi
 
   if [[ "$rollback_ok" != true ]]; then
