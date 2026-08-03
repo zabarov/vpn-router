@@ -44,6 +44,5 @@ values only in private, ignored configuration or an appropriate secret store.
 
 This document describes the project's intended use and contribution boundary;
 it is not legal advice. Laws and regulatory practice vary by jurisdiction and
-change over time. Operators and publishers should obtain qualified legal review
-when their deployment, service model, or publication creates material legal
-risk.
+change over time. Operators should obtain qualified legal review when their
+deployment or service model creates material legal risk.

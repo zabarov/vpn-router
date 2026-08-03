@@ -188,7 +188,7 @@ ignored `source/` directory. See [SECURITY.md](SECURITY.md).
 VPN Router provides software and configuration tooling, not hosted access,
 public exit nodes, credentials, or destination lists. Operators are responsible
 for authorization, applicable law, network policies, and service terms. Read
-[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md) before deployment or publication.
+[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md) before deployment.
 
 ## License
 
