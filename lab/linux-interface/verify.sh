@@ -137,6 +137,7 @@ sleep 2
 assert_response 192.0.2.20 strict-target
 assert_response 192.0.2.30 direct-target
 
+wait_for_stable_host_network
 VPN_ROUTER_CONFIG="$config_path" VPN_ROUTER_BOOT_WAIT_SECONDS=30 VPN_ROUTER_BOOT_ROLLBACK_AFTER=120 \
   "$service_helper" start
 assert_response 192.0.2.20 strict-target
