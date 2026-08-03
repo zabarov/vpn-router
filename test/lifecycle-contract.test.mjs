@@ -81,6 +81,23 @@ test('rollback verifies absence before reporting success', async () => {
   assert.match(rollback, /verify_baseline_restored \|\| rollback_ok=false/);
 });
 
+test('rollback compares stable network semantics instead of expiring lease timers', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  const normalizerStart = source.indexOf('normalize_network_json()');
+  const normalizerEnd = source.indexOf('manifest_matches_current_config()', normalizerStart);
+  const normalizer = source.slice(normalizerStart, normalizerEnd);
+  assert.match(normalizer, /"expires"/);
+  assert.match(normalizer, /"preferred_life_time"/);
+  assert.match(normalizer, /"valid_life_time"/);
+  assert.match(normalizer, /Object[.]keys\(value\)[.]sort\(\)/);
+
+  const verifyStart = source.indexOf('verify_baseline_restored()');
+  const verifyEnd = source.indexOf('write_manifest()', verifyStart);
+  const verify = source.slice(verifyStart, verifyEnd);
+  assert.match(verify, /normalize_network_json "\$MANIFEST_BACKUP_DIR\/\$file"/);
+  assert.match(verify, /cmp -s "\$verification_dir\/baseline-\$file" "\$verification_dir\/stable-\$file"/);
+});
+
 test('the root-only baseline covers host, source, and SSH routing state', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const backupStart = source.indexOf('capture_backup()');

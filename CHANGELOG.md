@@ -38,8 +38,9 @@ All notable changes are documented here.
   profile-supplied DNS and automatic routing directives in the isolated test.
 - Add SHA-pinned CI for static checks, unit/schema validation, secret and
   language guards, and both disposable Docker labs.
-- Capture host and source routing baselines and require exact address, route,
-  rule, and SSH-route restoration before rollback can report success.
+- Capture host and source routing baselines and require semantic address,
+  route, rule, and SSH-route restoration before rollback can report success;
+  ignore only expiring lease and router-advertisement timers.
 - Make the namespace lab wait for its capture tool before probing, eliminating
   a startup race in clean CI runners.
 - Remove TPROXY marks and policy-route tables after live kernel tracing showed

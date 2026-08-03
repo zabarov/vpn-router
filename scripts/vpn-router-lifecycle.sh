@@ -161,6 +161,29 @@ file_sha256() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+normalize_network_json() {
+  local source=$1 destination=$2
+  # JavaScript template syntax is intentionally passed verbatim to Node.
+  # shellcheck disable=SC2016
+  node -e '
+    const fs = require("node:fs");
+    const volatile = new Set(["expires", "preferred_life_time", "valid_life_time"]);
+    const normalize = (value) => {
+      if (Array.isArray(value)) {
+        return value.map(normalize).sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      }
+      if (value !== null && typeof value === "object") {
+        return Object.fromEntries(Object.keys(value).sort()
+          .filter((key) => !volatile.has(key))
+          .map((key) => [key, normalize(value[key])]));
+      }
+      return value;
+    };
+    fs.writeFileSync(process.argv[2], `${JSON.stringify(normalize(JSON.parse(fs.readFileSync(process.argv[1], "utf8"))))}\n`, { mode: 0o600 });
+  ' "$source" "$destination"
+}
+
 manifest_matches_current_config() {
   [[ "${MANIFEST_VERSION-}" == 1 ]] || return 1
   [[ "${MANIFEST_SERVICE-}" == "$SERVICE_NAME" ]] || return 1
@@ -345,11 +368,18 @@ verify_baseline_restored() {
     ip -j route get "$ssh_peer" >"$verification_dir/host-ssh-route.json" || matches=false
   fi
 
-  for file in host-addresses.json host-routes.json host-rules.json source-addresses.json source-routes.json source-rules.json; do
+  for file in host-addresses.json host-routes.json source-addresses.json source-routes.json; do
+    normalize_network_json "$MANIFEST_BACKUP_DIR/$file" "$verification_dir/baseline-$file" || matches=false
+    normalize_network_json "$verification_dir/$file" "$verification_dir/stable-$file" || matches=false
+    cmp -s "$verification_dir/baseline-$file" "$verification_dir/stable-$file" || matches=false
+  done
+  for file in host-rules.json source-rules.json; do
     cmp -s "$MANIFEST_BACKUP_DIR/$file" "$verification_dir/$file" || matches=false
   done
   if [[ -f "$MANIFEST_BACKUP_DIR/host-ssh-route.json" ]]; then
-    cmp -s "$MANIFEST_BACKUP_DIR/host-ssh-route.json" "$verification_dir/host-ssh-route.json" || matches=false
+    normalize_network_json "$MANIFEST_BACKUP_DIR/host-ssh-route.json" "$verification_dir/baseline-host-ssh-route.json" || matches=false
+    normalize_network_json "$verification_dir/host-ssh-route.json" "$verification_dir/stable-host-ssh-route.json" || matches=false
+    cmp -s "$verification_dir/baseline-host-ssh-route.json" "$verification_dir/stable-host-ssh-route.json" || matches=false
   fi
   sha256sum "$verification_dir"/* >"$verification_dir/SHA256SUMS" || matches=false
   chmod 600 "$verification_dir"/* 2>/dev/null || matches=false

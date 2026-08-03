@@ -67,7 +67,9 @@ copy for verification or rollback before applying a new revision.
    two project networks.
 4. Keep `/var/lib/<service_name>/egress-tailscale/` intact.
 5. Compare host and source addresses, routes, policy rules, and the recorded SSH
-   route with the pre-apply snapshots. The owned nftables table must be absent;
+   route with the pre-apply snapshots. Address and route order is normalized,
+   and expiring lease/router-advertisement timers are ignored; all stable
+   network fields must still match. The owned nftables table must be absent;
    full ruleset bytes are not compared because unrelated packet counters move.
 6. Mark the root-only manifest `rolled_back` only after those checks pass.
 
