@@ -288,7 +288,8 @@ render_artifacts() {
 
 validate_artifacts() {
   local destination=$1
-  docker run --rm -v "$destination/sing-box.json:/config.json:ro" "$SING_BOX_IMAGE" check -c /config.json >/dev/null
+  docker run --rm --network none -v "$destination/sing-box.json:/config.json:ro" \
+    "$SING_BOX_IMAGE" check -c /config.json >/dev/null
   source_exec nft -c -f - <"$destination/vpn-router.nft"
 }
 
@@ -802,7 +803,8 @@ apply_command() {
   validate_artifacts "$ARTIFACT_DIR"
   if uses_managed_dns; then
     docker build -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
-    docker run --rm -v "$ARTIFACT_DIR/dnsmasq.conf:/etc/dnsmasq.conf:ro" "$DNS_IMAGE" --test >/dev/null
+    docker run --rm --network none -v "$ARTIFACT_DIR/dnsmasq.conf:/etc/dnsmasq.conf:ro" \
+      "$DNS_IMAGE" --test >/dev/null
   fi
   backup_dir=$(capture_backup)
   write_manifest applying "$backup_dir" false

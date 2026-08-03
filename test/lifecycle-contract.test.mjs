@@ -173,3 +173,9 @@ test('a host Linux source reuses one namespace snapshot consistently', async () 
   assert.match(source, /if uses_container_source; then[\s\S]*cp "\$backup_dir\/host-addresses[.]json" "\$backup_dir\/source-addresses[.]json"/);
   assert.match(source, /cp "\$verification_dir\/host-routes[.]json" "\$verification_dir\/source-routes[.]json"/);
 });
+
+test('artifact validation cannot create transient Docker network routes', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  assert.match(source, /docker run --rm --network none -v "\$destination\/sing-box[.]json/);
+  assert.match(source, /docker run --rm --network none -v "\$ARTIFACT_DIR\/dnsmasq[.]conf/);
+});
