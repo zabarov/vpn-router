@@ -81,10 +81,10 @@ A `tailscale_socks` egress declares the isolated userspace service:
 
 ```yaml
 egresses:
-  - tag: regional-exit
+  - tag: strict-egress
     type: tailscale_socks
     auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
-    exit_node: regional-exit.example.ts.net
+    exit_node: exit-node.example.ts.net
     proxy_server: vpn-router-egress
     proxy_port: 1055
     healthcheck_url: https://example.com/
@@ -138,19 +138,18 @@ Sets may contain IPv4 CIDRs, lower-case ASCII domain suffixes, or both:
 
 ```yaml
 destination_sets:
-  regional-services:
+  selected-services:
     domain_suffixes:
-      - .ru
-      - .xn--p1ai
-      - .su
+      - .service.example
+      - .corp.example
     ip_cidrs:
       - 192.0.2.0/24
 ```
 
-Use punycode for internationalized names. This list does not mean "all services
-from a country." Add services on `.com`, `.net`, or another suffix explicitly.
-An IP learned for one selected hostname can also serve unrelated names on a
-shared CDN, so strict profiles need acceptance testing.
+Use punycode for internationalized names. The committed suffixes are reserved
+documentation examples, not a maintained destination list or geographic
+database. An IP learned for one selected hostname can also serve unrelated
+names on a shared CDN, so strict profiles need acceptance testing.
 
 ## Managed DNS limitations
 

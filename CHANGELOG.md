@@ -14,6 +14,9 @@ All notable changes are documented here.
 - Add a beginner `vpn-router setup` wizard that discovers an Amnezia install,
   asks only for the Tailscale exit and domain policy, and can explicitly expand
   from one test client to the discovered VPN subnet with `--all-clients`.
+- Require an explicit domain policy for the Amnezia/Tailscale preset, use only
+  reserved domains in active public examples, and publish responsible-use and
+  publication guidance.
 - Add opt-in systemd boot reconciliation with bounded source readiness, a
   rollback deadman, health verification, and routing cleanup on service stop.
 - Add a managed host-namespace lifecycle for WireGuard, OpenVPN, IPsec, and

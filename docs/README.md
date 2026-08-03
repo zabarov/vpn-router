@@ -20,6 +20,7 @@ and egress adapters.
 - [Configuration reference](developer/configuration.md)
 - [Production contract](developer/production-contract.md)
 - [Production readiness](developer/production-readiness.md)
+- [Publication guidelines](developer/publication-guidelines.md)
 - [0.3 multi-client validation report](operations/validation-report-0.3.md)
 - [0.4 clean-host validation report](operations/validation-report-0.4.md)
 
@@ -28,3 +29,7 @@ and egress adapters.
 The committed documentation is intentionally public and English-only. Local
 inventory, credentials, raw logs, and work-in-progress evidence belong under
 the ignored `source/` directory.
+
+The repository-wide [responsible-use policy](../RESPONSIBLE_USE.md) defines the
+operator and contribution boundary for deployments, examples, and public
+articles.

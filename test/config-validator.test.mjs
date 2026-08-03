@@ -108,7 +108,7 @@ test('requires exactly one strict and one default-direct policy', () => {
 
 test('requires managed DNS for strict domain policies', () => {
   const config = validConfig();
-  config.destination_sets['regional-services'] = { domain_suffixes: ['.ru'] };
+  config.destination_sets['regional-services'] = { domain_suffixes: ['.service.example'] };
   config.traffic_handling.dns_mode = 'system';
   assert.match(validateConfig(config).errors.join('\n'), /strict domain policies require.*managed/);
 });

@@ -33,7 +33,7 @@ test('non-interactive wizard creates a private validated Tailscale canary config
     assert.deepEqual(config.sources[0].client_scope.addresses, ['10.9.0.2/32', '10.9.0.3/32']);
     assert.equal(config.egresses[0].proxy_server, 'regional-router-egress');
     assert.equal(config.egresses[0].auth_key_env, 'VPN_ROUTER_TAILSCALE_AUTH_KEY');
-    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.ru', '.xn--p1ai', '.su']);
+    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -120,16 +120,28 @@ test('amnezia-tailscale preset requires explicit real topology in non-interactiv
     const result = spawnSync(process.execPath, [configurePath.pathname,
       '--non-interactive', '--preset', 'amnezia-tailscale', '--output', output,
       '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
-      '--client-addresses', '10.8.1.9/32', '--exit-node', 'exit.example.ts.net'
+      '--client-addresses', '10.8.1.9/32', '--exit-node', 'exit.example.ts.net',
+      '--domains', '.service.example'
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const config = parse(await readFile(output, 'utf8'));
     assert.equal(config.sources[0].container_name, 'amnezia-awg');
     assert.deepEqual(config.sources[0].client_scope.addresses, ['10.8.1.9/32']);
     assert.equal(config.egresses[0].type, 'tailscale_socks');
+    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.service.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('non-interactive Amnezia preset requires an operator-supplied domain policy', () => {
+  const result = spawnSync(process.execPath, [configurePath.pathname,
+    '--non-interactive', '--preset', 'amnezia-tailscale',
+    '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
+    '--client-addresses', '10.8.1.9/32', '--exit-node', 'exit.example.ts.net'
+  ], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires --domains/);
 });
 
 test('amnezia-tailscale preset auto-selects one discovered source and one canary', async () => {
@@ -151,7 +163,7 @@ test('amnezia-tailscale preset permits an explicit subnet only after canary roll
     '--non-interactive', '--preset', 'amnezia-tailscale',
     '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
     '--client-scope', 'subnet', '--client-subnet', '10.8.1.0/24',
-    '--exit-node', 'exit.example.ts.net'
+    '--exit-node', 'exit.example.ts.net', '--domains', '.service.example'
   ]);
   const configured = await applyPreset(values, async () => {
     throw new Error('discovery must not run for explicit topology');
@@ -181,14 +193,14 @@ test('setup shortcut creates an Amnezia and Tailscale config through the guarded
       '--source-container', 'amnezia-awg', '--source-interface', 'awg0',
       '--client-addresses', '10.8.1.7/32',
       '--exit-node', 'exit.example.ts.net',
-      '--domains', '.ru,.xn--p1ai,.su,.example'
+      '--domains', '.service.example,.corp.example'
     ], {
       encoding: 'utf8'
     });
     assert.equal(result.status, 0, result.stderr);
     const config = parse(await readFile(output, 'utf8'));
     assert.equal(config.egresses[0].exit_node, 'exit.example.ts.net');
-    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.ru', '.xn--p1ai', '.su', '.example']);
+    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.service.example', '.corp.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -200,5 +212,6 @@ test('interactive beginner preset asks only user-owned routing choices', () => {
   const presetWizard = configureSource.slice(start, end);
   assert.match(presetWizard, /Tailscale exit node name or IP/);
   assert.match(presetWizard, /Domain suffixes routed through Tailscale/);
+  assert.match(presetWizard, /askRequired\(rl, 'Domain suffixes routed through Tailscale'/);
   assert.doesNotMatch(presetWizard, /VPN source type|Owned nftables table|Service name/);
 });

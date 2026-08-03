@@ -8,7 +8,7 @@ const config = {
   capture: { type: 'redirect', listen_port: 12345 },
   egresses: [{ tag: 'direct', type: 'direct' }, { tag: 'regional-exit', type: 'tailscale_socks', auth_key_env: 'VPN_ROUTER_TAILSCALE_AUTH_KEY', exit_node: 'regional-exit.example.ts.net', proxy_server: 'vpn-router-egress', proxy_port: 1055, healthcheck_url: 'https://example.com/' }],
   policies: [{ tag: 'selected', source: 'amnezia-in', destination_sets: ['regional-services'], egress: 'regional-exit', failure_mode: 'block' }, { tag: 'default', source: 'amnezia-in', destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }],
-  destination_sets: { 'regional-services': { domain_suffixes: ['.ru', '.xn--p1ai', '.su'] } },
+  destination_sets: { 'regional-services': { domain_suffixes: ['.service.example', '.corp.example'] } },
   traffic_handling: { udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed' },
   resources: { nftables_table: 'vpn_router', service_name: 'vpn-router' }
 };
@@ -18,5 +18,5 @@ test('generates dnsmasq nftset rules for strict domain suffixes', () => {
   assert.match(generated, /^port=5353$/m);
   assert.match(generated, /^max-ttl=300$/m);
   assert.match(generated, /^max-cache-ttl=300$/m);
-  assert.match(generated, /^nftset=\/ru\/xn--p1ai\/su\/4#inet#vpn_router#set_regional_services_dns$/m);
+  assert.match(generated, /^nftset=\/service[.]example\/corp[.]example\/4#inet#vpn_router#set_regional_services_dns$/m);
 });

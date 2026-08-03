@@ -108,13 +108,13 @@ sudo vpn-router configure \
   --egress-type tailscale_socks \
   --exit-node exit-node.example.ts.net \
   --healthcheck-url https://example.com/ \
-  --domains .ru,.xn--p1ai,.su
+  --domains .service.example,.corp.example
 ```
 
-Replace every example topology value. The `.ru`, `.xn--p1ai`, and `.su`
-suffixes are merely an example policy; add or remove suffixes for the region or
-services you need. See the [configuration reference](../developer/configuration.md)
-for external SOCKS5 and Linux-interface egresses.
+Replace every example topology value. Reserved `.example` suffixes intentionally
+route no real service; supply only destinations you are authorized to route.
+See the [configuration reference](../developer/configuration.md) for external
+SOCKS5 and Linux-interface egresses.
 
 Validate without changing networking:
 

@@ -122,9 +122,10 @@ subnet, and one test client. It asks only for:
 1. the Tailscale exit-node name or address from step 2;
 2. the domain suffixes that should use that exit.
 
-The default suffixes are `.ru`, `.xn--p1ai`, and `.su`. This is only a domain
-list, not a complete country database. Add services on other suffixes
-explicitly when needed.
+There is no country-specific default. Enter the suffixes you are authorized to
+route, for example `.service.example` in a documentation-only configuration.
+A suffix list is not a geographic database; add every required service
+deliberately and test shared-CDN effects.
 
 The wizard creates `/etc/vpn-router/router.yaml` with private file permissions.
 It does not enable routing yet.

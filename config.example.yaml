@@ -17,20 +17,20 @@ capture:
 egresses:
   - tag: direct
     type: direct
-  - tag: regional-exit
+  - tag: strict-egress
     type: tailscale_socks
     auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
-    exit_node: regional-exit.example.ts.net
+    exit_node: exit-node.example.ts.net
     proxy_server: vpn-router-egress
     proxy_port: 1055
     healthcheck_url: https://example.com/
 
 policies:
-  - tag: selected-regional-services
+  - tag: selected-services
     source: amnezia-in
     destination_sets:
-      - regional-services
-    egress: regional-exit
+      - selected-services
+    egress: strict-egress
     failure_mode: block
   - tag: default-direct
     source: amnezia-in
@@ -40,11 +40,10 @@ policies:
     failure_mode: direct
 
 destination_sets:
-  regional-services:
+  selected-services:
     domain_suffixes:
-      - .ru
-      - .xn--p1ai
-      - .su
+      - .service.example
+      - .corp.example
 
 traffic_handling:
   udp_quic: reject

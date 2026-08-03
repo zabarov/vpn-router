@@ -40,9 +40,10 @@ The pre-alpha contract intentionally stays narrow:
 - no IPv6 route claim;
 - no direct fallback when capture or the strict egress is unavailable.
 
-The example regional profile contains `.ru`, `.xn--p1ai`, and `.su`. It is only
-a suffix list. Services hosted on `.com`, `.net`, shared CDNs, or direct IPs
-must be added deliberately and can have shared-IP side effects.
+The committed example uses reserved `.example` suffixes. Operators must choose
+their own authorized destination suffixes deliberately. Domain suffixes are
+not a geographic database; services on other names, shared CDNs, or direct IPs
+must be handled explicitly and can have shared-IP side effects.
 
 Chrome Secure DNS, other DoH/DoT clients, ECH, direct-IP connections, and IPv6
 are outside the guaranteed mode. Use system DNS and disable those alternate
@@ -181,6 +182,13 @@ recovery.
 Never commit VPN profiles, private keys, Tailscale auth keys, real hostnames,
 IP addresses, or raw inventory. Local operational material belongs in the
 ignored `source/` directory. See [SECURITY.md](SECURITY.md).
+
+## Responsible use
+
+VPN Router provides software and configuration tooling, not hosted access,
+public exit nodes, credentials, or destination lists. Operators are responsible
+for authorization, applicable law, network policies, and service terms. Read
+[RESPONSIBLE_USE.md](RESPONSIBLE_USE.md) before deployment or publication.
 
 ## License
 

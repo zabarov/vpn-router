@@ -22,7 +22,7 @@ const defaults = {
   socksPort: '1080',
   egressInterface: 'wg-exit',
   healthcheckUrl: 'https://example.com/',
-  domains: '.ru,.xn--p1ai,.su',
+  domains: '.example',
   serviceName: 'vpn-router',
   nftablesTable: 'vpn_router',
   preset: null,
@@ -148,7 +148,11 @@ export async function applyPreset(values, discover = discoverAmneziaSources) {
   if (values.nonInteractive && !values.provided.has('exitNode')) {
     throw new Error('The non-interactive amnezia-tailscale preset requires --exit-node.');
   }
+  if (values.nonInteractive && !values.provided.has('domains')) {
+    throw new Error('The non-interactive amnezia-tailscale preset requires --domains.');
+  }
   if (!values.provided.has('exitNode')) values.exitNode = '';
+  if (!values.provided.has('domains')) values.domains = '';
   return values;
 }
 
@@ -210,7 +214,7 @@ async function collectPresetInteractive(values) {
       process.stdout.write(`  test client: ${values.clientAddresses}\n\n`);
     }
     values.exitNode = await askRequired(rl, 'Tailscale exit node name or IP', values.exitNode);
-    values.domains = await ask(rl, 'Domain suffixes routed through Tailscale', values.domains);
+    values.domains = await askRequired(rl, 'Domain suffixes routed through Tailscale', values.domains);
   } finally {
     rl.close();
   }

@@ -26,7 +26,7 @@ outside the `/32` is mandatory.
 | --- | --- |
 | Direct hostname/IP from canary | Uses the existing Amnezia direct egress |
 | Selected suffix from canary | Uses the selected Tailscale exit |
-| `.ru`, `.xn--p1ai`, `.su` | Selected after managed DNS response |
+| Every configured suffix | Selected after managed DNS response |
 | Explicit non-country suffix | Selected only when configured explicitly |
 | First TCP connection after DNS | Already captured; never races direct |
 | Tailscale/SOCKS stopped | Selected traffic blocked; direct still works |

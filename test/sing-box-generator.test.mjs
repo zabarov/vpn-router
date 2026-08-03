@@ -38,7 +38,7 @@ test('generates a redirect and isolated Tailscale SOCKS egress contract', () => 
 
 test('does not reclassify traffic already selected by managed DNS', () => {
   const domainConfig = structuredClone(config);
-  domainConfig.destination_sets['regional-services'] = { domain_suffixes: ['.ru', '.xn--p1ai', '.su'] };
+  domainConfig.destination_sets['regional-services'] = { domain_suffixes: ['.service.example', '.corp.example'] };
   const generated = generateSingBoxConfig(domainConfig);
   assert.deepEqual(generated.route.rules, [{ inbound: ['capture-in'], outbound: 'regional-exit' }]);
   assert.doesNotMatch(JSON.stringify(generated), /sniff|domain_suffix|ip_cidr/);

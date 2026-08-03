@@ -17,7 +17,8 @@ docker run --rm \
     vpn-router setup --non-interactive --output /etc/vpn-router/router.yaml \
       --source-container source-vpn --source-interface awg0 \
       --client-addresses 10.44.0.2/32 \
-      --exit-node exit.example.ts.net >/dev/null
+      --exit-node exit.example.ts.net \
+      --domains .service.example >/dev/null
     vpn-router validate >/dev/null
     old_release=$(readlink /opt/vpn-router/current)
     mkdir -p /candidate
