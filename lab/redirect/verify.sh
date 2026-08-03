@@ -33,7 +33,9 @@ trap cleanup EXIT INT TERM
 node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_SING_BOX_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_DNSMASQ_CONFIG"
-chmod 600 "$artifact_dir"/*
+# The 0700 parent limits host visibility. Read-only
+# bind mounts need 0644 because the test containers deliberately drop DAC override.
+chmod 644 "$artifact_dir"/*
 
 fetch() {
   client=$1

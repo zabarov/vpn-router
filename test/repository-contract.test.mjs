@@ -63,4 +63,6 @@ test('the redirect lab waits for real dependencies and preserves failure diagnos
     assert.ok(compose.services[name].healthcheck, `${name} must publish a readiness check`);
   }
   assert.match(verify, /docker compose -f "\$compose_file" logs --no-color/);
+  assert.match(verify, /chmod 700 "\$artifact_dir"/);
+  assert.match(verify, /chmod 644 "\$artifact_dir"\/\*/);
 });
