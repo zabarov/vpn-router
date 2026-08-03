@@ -444,17 +444,20 @@ capture_backup() {
 
 verify_baseline_restored() {
   local timestamp verification_dir ssh_peer file matches=true
+  local mismatch_file="$RUNTIME_DIR/last-baseline-mismatch.txt"
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   mkdir -p "$RUNTIME_DIR/rollback-verification"
   verification_dir=$(mktemp -d "$RUNTIME_DIR/rollback-verification/$timestamp.XXXXXX")
   chmod 700 "$verification_dir"
 
-  ip -j address show >"$verification_dir/host-addresses.json" || matches=false
-  ip -j route show table all >"$verification_dir/host-routes.json" || matches=false
-  ip -j rule show >"$verification_dir/host-rules.json" || matches=false
-  source_exec ip -j address show >"$verification_dir/source-addresses.json" || matches=false
-  source_exec ip -j route show table all >"$verification_dir/source-routes.json" || matches=false
-  source_exec ip -j rule show >"$verification_dir/source-rules.json" || matches=false
+  : >"$mismatch_file"
+  chmod 600 "$mismatch_file"
+  ip -j address show >"$verification_dir/host-addresses.json" || { matches=false; echo host-addresses-command >>"$mismatch_file"; }
+  ip -j route show table all >"$verification_dir/host-routes.json" || { matches=false; echo host-routes-command >>"$mismatch_file"; }
+  ip -j rule show >"$verification_dir/host-rules.json" || { matches=false; echo host-rules-command >>"$mismatch_file"; }
+  source_exec ip -j address show >"$verification_dir/source-addresses.json" || { matches=false; echo source-addresses-command >>"$mismatch_file"; }
+  source_exec ip -j route show table all >"$verification_dir/source-routes.json" || { matches=false; echo source-routes-command >>"$mismatch_file"; }
+  source_exec ip -j rule show >"$verification_dir/source-rules.json" || { matches=false; echo source-rules-command >>"$mismatch_file"; }
 
   if [[ -s "$MANIFEST_BACKUP_DIR/host-ssh-peer.txt" ]]; then
     ssh_peer=$(<"$MANIFEST_BACKUP_DIR/host-ssh-peer.txt")
@@ -464,19 +467,26 @@ verify_baseline_restored() {
   for file in host-addresses.json host-routes.json source-addresses.json source-routes.json; do
     normalize_network_json "$MANIFEST_BACKUP_DIR/$file" "$verification_dir/baseline-$file" || matches=false
     normalize_network_json "$verification_dir/$file" "$verification_dir/stable-$file" || matches=false
-    cmp -s "$verification_dir/baseline-$file" "$verification_dir/stable-$file" || matches=false
+    cmp -s "$verification_dir/baseline-$file" "$verification_dir/stable-$file" \
+      || { matches=false; echo "$file" >>"$mismatch_file"; }
   done
   for file in host-rules.json source-rules.json; do
-    cmp -s "$MANIFEST_BACKUP_DIR/$file" "$verification_dir/$file" || matches=false
+    cmp -s "$MANIFEST_BACKUP_DIR/$file" "$verification_dir/$file" \
+      || { matches=false; echo "$file" >>"$mismatch_file"; }
   done
   if [[ -f "$MANIFEST_BACKUP_DIR/host-ssh-route.json" ]]; then
     normalize_network_json "$MANIFEST_BACKUP_DIR/host-ssh-route.json" "$verification_dir/baseline-host-ssh-route.json" || matches=false
     normalize_network_json "$verification_dir/host-ssh-route.json" "$verification_dir/stable-host-ssh-route.json" || matches=false
-    cmp -s "$verification_dir/baseline-host-ssh-route.json" "$verification_dir/stable-host-ssh-route.json" || matches=false
+    cmp -s "$verification_dir/baseline-host-ssh-route.json" "$verification_dir/stable-host-ssh-route.json" \
+      || { matches=false; echo host-ssh-route.json >>"$mismatch_file"; }
   fi
   sha256sum "$verification_dir"/* >"$verification_dir/SHA256SUMS" || matches=false
   chmod 600 "$verification_dir"/* 2>/dev/null || matches=false
-  [[ "$matches" == true ]]
+  if [[ "$matches" == true ]]; then
+    rm -f "$mismatch_file"
+    return 0
+  fi
+  return 1
 }
 
 write_manifest() {
@@ -664,6 +674,9 @@ rollback_command() {
   if [[ -n "$current_source_id" && "$current_source_id" == "$MANIFEST_SOURCE_ID" ]]; then
     wait_for_baseline_restored || {
       echo 'rollback=FAIL: the stable host or source network baseline changed' >&2
+      if [[ -s "$RUNTIME_DIR/last-baseline-mismatch.txt" ]]; then
+        echo "rollback=BASELINE_MISMATCH:$(paste -sd, "$RUNTIME_DIR/last-baseline-mismatch.txt")" >&2
+      fi
       rollback_ok=false
     }
   fi
