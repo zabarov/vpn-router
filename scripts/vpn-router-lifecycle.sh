@@ -433,10 +433,17 @@ capture_backup() {
     printf '%s\n' "$ssh_peer" >"$backup_dir/host-ssh-peer.txt"
     ip -j route get "$ssh_peer" >"$backup_dir/host-ssh-route.json"
   fi
-  source_exec ip -j address show >"$backup_dir/source-addresses.json"
-  source_exec ip -j route show table all >"$backup_dir/source-routes.json"
-  source_exec ip -j rule show >"$backup_dir/source-rules.json"
-  source_exec nft -j list ruleset >"$backup_dir/source-nftables.json"
+  if uses_container_source; then
+    source_exec ip -j address show >"$backup_dir/source-addresses.json"
+    source_exec ip -j route show table all >"$backup_dir/source-routes.json"
+    source_exec ip -j rule show >"$backup_dir/source-rules.json"
+    source_exec nft -j list ruleset >"$backup_dir/source-nftables.json"
+  else
+    cp "$backup_dir/host-addresses.json" "$backup_dir/source-addresses.json"
+    cp "$backup_dir/host-routes.json" "$backup_dir/source-routes.json"
+    cp "$backup_dir/host-rules.json" "$backup_dir/source-rules.json"
+    cp "$backup_dir/host-nftables.json" "$backup_dir/source-nftables.json"
+  fi
   sha256sum "$backup_dir"/* >"$backup_dir/SHA256SUMS"
   chmod 600 "$backup_dir"/*
   printf '%s' "$backup_dir"
@@ -455,9 +462,15 @@ verify_baseline_restored() {
   ip -j address show >"$verification_dir/host-addresses.json" || { matches=false; echo host-addresses-command >>"$mismatch_file"; }
   ip -j route show table all >"$verification_dir/host-routes.json" || { matches=false; echo host-routes-command >>"$mismatch_file"; }
   ip -j rule show >"$verification_dir/host-rules.json" || { matches=false; echo host-rules-command >>"$mismatch_file"; }
-  source_exec ip -j address show >"$verification_dir/source-addresses.json" || { matches=false; echo source-addresses-command >>"$mismatch_file"; }
-  source_exec ip -j route show table all >"$verification_dir/source-routes.json" || { matches=false; echo source-routes-command >>"$mismatch_file"; }
-  source_exec ip -j rule show >"$verification_dir/source-rules.json" || { matches=false; echo source-rules-command >>"$mismatch_file"; }
+  if uses_container_source; then
+    source_exec ip -j address show >"$verification_dir/source-addresses.json" || { matches=false; echo source-addresses-command >>"$mismatch_file"; }
+    source_exec ip -j route show table all >"$verification_dir/source-routes.json" || { matches=false; echo source-routes-command >>"$mismatch_file"; }
+    source_exec ip -j rule show >"$verification_dir/source-rules.json" || { matches=false; echo source-rules-command >>"$mismatch_file"; }
+  else
+    cp "$verification_dir/host-addresses.json" "$verification_dir/source-addresses.json"
+    cp "$verification_dir/host-routes.json" "$verification_dir/source-routes.json"
+    cp "$verification_dir/host-rules.json" "$verification_dir/source-rules.json"
+  fi
 
   if [[ -s "$MANIFEST_BACKUP_DIR/host-ssh-peer.txt" ]]; then
     ssh_peer=$(<"$MANIFEST_BACKUP_DIR/host-ssh-peer.txt")
