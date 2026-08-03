@@ -88,8 +88,9 @@ removed or revoked after testing.
 
 ## Managed lifecycle
 
-The guarded managed lifecycle currently applies to the reference
-`amneziawg2_container` plus `tailscale_socks` combination:
+The guarded managed lifecycle currently applies to an
+`amneziawg2_container` source. It manages the Tailscale sidecar when selected,
+or health-checks an operator-managed SOCKS5 service or tunnel interface:
 
 ```sh
 sudo ./scripts/vpn-router-lifecycle.sh preflight --config ./router.yaml
@@ -109,7 +110,8 @@ sudo ./scripts/vpn-router-lifecycle.sh verify \
 ```
 
 `disable` is the normal routing switch. It removes only project-owned routing
-resources and preserves the existing VPN and persisted Tailscale enrollment.
+resources and preserves the existing VPN, external egress, and persisted
+Tailscale enrollment.
 The legacy `apply` and `rollback` commands remain available for automation and
 recovery.
 

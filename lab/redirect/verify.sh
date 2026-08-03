@@ -12,6 +12,7 @@ chmod 700 "$artifact_dir"
 export VPN_ROUTER_LAB_NFTABLES_CONFIG="$artifact_dir/vpn-router.nft"
 export VPN_ROUTER_LAB_SING_BOX_CONFIG="$artifact_dir/sing-box.json"
 export VPN_ROUTER_LAB_DNSMASQ_CONFIG="$artifact_dir/dnsmasq.conf"
+subnet_nftables_config="$artifact_dir/vpn-router-subnet.nft"
 
 cleanup() {
   cleanup_status=$?
@@ -33,6 +34,7 @@ trap cleanup EXIT INT TERM
 node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_SING_BOX_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_DNSMASQ_CONFIG"
+node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.subnet.yaml" >"$subnet_nftables_config"
 # The 0700 parent limits host visibility. Read-only
 # bind mounts need 0644 because the test containers deliberately drop DAC override.
 chmod 644 "$artifact_dir"/*
@@ -97,6 +99,20 @@ if [ "$(docker compose -f "$compose_file" ps -q sidecar)" != "$sidecar_id" ]; th
   exit 1
 fi
 
+# Prove that an explicit whole-pool subnet includes the formerly excluded
+# control client, then restore the staged address list before outage tests.
+docker compose -f "$compose_file" exec -T source nft delete table inet vpn_router_lab
+docker compose -f "$compose_file" exec -T source nft -f - <"$subnet_nftables_config"
+resolve_strict
+docker compose -f "$compose_file" stop socks-egress >/dev/null
+assert_blocked control-client 172.30.20.20
+docker compose -f "$compose_file" exec -T source nft delete table inet vpn_router_lab
+docker compose -f "$compose_file" exec -T source nft -f - <"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
+resolve_strict
+assert_response control-client 172.30.20.20 strict-target
+docker compose -f "$compose_file" start socks-egress >/dev/null
+sleep 2
+
 docker compose -f "$compose_file" stop dns >/dev/null
 sleep 3
 docker compose -f "$compose_file" exec -T source \
@@ -121,4 +137,4 @@ if docker network inspect "${project_name}_lab" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "PASS: managed DNS selected the first connection, two selected clients required TCP redirect and SOCKS, a stopped SOCKS name failed closed and recovered without restarting sing-box, both outages preserved direct traffic, selected addresses persisted after managed DNS stopped, an excluded control client was unaffected, and cleanup completed."
+echo "PASS: managed DNS selected the first connection, two selected clients required TCP redirect and SOCKS, explicit subnet scope included the full test pool, staged scope restoration excluded the control client, a stopped SOCKS name failed closed and recovered without restarting sing-box, both outages preserved direct traffic, selected addresses persisted after managed DNS stopped, and cleanup completed."

@@ -7,10 +7,10 @@ gates.
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
 | Configuration | Client list/subnet selectors, migration, negative validation | Implemented; integration expansion pending |
-| Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | Generator fixtures pass; managed adapters pending |
+| Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 data path and all generator fixtures pass; Linux-interface integration pending |
 | Routing switch | Idempotent enable/disable with preserved VPN and egress state | Implemented; disposable lifecycle proof pending |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
-| Whole pool | Explicit test subnet with no interface-only wildcard | Planned |
+| Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
 | Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Partial |
 | Restart lifecycle | Host reboot, Docker restart and source recreation | Planned |
 | Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Planned |

@@ -5,10 +5,8 @@ sources:
     type: linux_interface
     interface: awg0
     client_scope:
-      mode: address_list
-      addresses:
-        - 10.8.1.2/32
-        - 10.8.1.3/32
+      mode: subnet
+      subnet: 10.8.1.0/24
 
 capture:
   type: redirect

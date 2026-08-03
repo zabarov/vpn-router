@@ -52,8 +52,8 @@ The first production contract defines these strict TCP egress capabilities:
 | Type | Ownership | Use case |
 | --- | --- | --- |
 | `tailscale_socks` | managed userspace sidecar | Exit through a selected Tailscale node without changing the VPN namespace route. |
-| `socks5` | external service | Exit through any reachable SOCKS5 service, including one hosted on another server. |
-| `linux_interface` | pre-existing local interface | Exit through a separately managed tunnel or interface in the source namespace. |
+| `socks5` | external service | Exit through any reachable SOCKS5 service, including one hosted on another server. The lifecycle checks but does not own it. |
+| `linux_interface` | pre-existing local interface | Exit through a separately managed tunnel or interface in the source namespace. The lifecycle checks but does not own it. |
 
 Credentials are never configuration values. An adapter may reference an
 environment variable or root-only secret file name when credential support is

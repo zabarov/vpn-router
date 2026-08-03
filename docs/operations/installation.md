@@ -9,7 +9,8 @@ The managed AmneziaWG2 adapter requires:
 - Node.js 22 or newer;
 - an existing, healthy AmneziaWG2 container and `awg0` interface;
 - `/dev/net/tun` for an isolated client test;
-- a Tailscale exit node that is online and allowed by Tailnet policy;
+- one supported strict egress: a Tailscale exit node, reachable SOCKS5 service,
+  or pre-existing tunnel interface;
 - a unique test-client IPv4 address expressed as an `address_list` `/32`.
 
 Do not use the operator's own workstation as the first test client.
@@ -64,12 +65,15 @@ Copy `config.example.yaml` outside Git. Set:
 - the real Amnezia container and interface names;
 - one canary `/32` in `client_scope.addresses` for the first enable;
 - a unique `resources.service_name` and nftables table;
-- the Tailscale exit-node full hostname or IP;
-- `proxy_server` to `<service_name>-egress`.
 - a credential-free HTTPS `healthcheck_url` that is reachable through the
   selected exit.
 
-For first enrollment, export the auth key only in the root session:
+For `tailscale_socks`, also set the exit-node full hostname or IP and set
+`proxy_server` to `<service_name>-egress`. For `socks5`, set the external server
+and port. For `linux_interface`, ensure the named egress interface already
+exists inside the Amnezia source namespace.
+
+For first Tailscale enrollment, export the auth key only in the root session:
 
 ```sh
 export VPN_ROUTER_TAILSCALE_AUTH_KEY='set-in-a-secret-manager-or-root-session'
@@ -136,8 +140,8 @@ root-only `/var/lib/<service_name>/runtime/config.yaml` to verify or roll back.
 
 ## Current deployment boundary
 
-`linux_interface` sources and `socks5`/`linux_interface` strict egresses are
-supported by validation and artifact generation, but
-the bundled managed lifecycle does not yet install host-network processes for
-that adapter. Treat a generic-interface deployment as an operator-owned runtime
-until a separate lifecycle adapter is released and proven.
+The bundled lifecycle manages an `amneziawg2_container` source with any current
+strict egress type. An external SOCKS5 service or tunnel interface remains
+operator-owned and must exist before preflight. A `linux_interface` source is
+supported by validation and artifact generation, but does not yet have a
+bundled host-namespace lifecycle adapter.

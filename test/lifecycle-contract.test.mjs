@@ -50,15 +50,23 @@ test('an active manifest must match both the stored and requested config', async
   assert.match(source, /config_path=\$invocation_config/);
 });
 
-test('runtime verification checks the selected exit and HTTPS through SOCKS', async () => {
+test('runtime verification checks the selected exit and adapter-specific HTTPS path', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const verifyStart = source.indexOf('verify_internal()');
   const verifyEnd = source.indexOf('cancel_deadman_timer()', verifyStart);
   const verify = source.slice(verifyStart, verifyEnd);
   assert.match(verify, /ExitNodeStatus\?\.Online===true/);
-  assert.match(verify, /--socks5-hostname/);
-  assert.match(verify, /TAILSCALE_HEALTHCHECK_URL/);
+  assert.match(verify, /wait_for_socks_egress/);
   assert.match(verify, /egress_auth_key_scrubbed \|\| return 1/);
+
+  const healthStart = source.indexOf('wait_for_socks_egress()');
+  const healthEnd = source.indexOf('capture_failure_evidence()', healthStart);
+  const health = source.slice(healthStart, healthEnd);
+  assert.match(health, /STRICT_EGRESS_TYPE" == socks5/);
+  assert.match(health, /--socks5-hostname/);
+  assert.match(health, /STRICT_EGRESS_TYPE" == linux_interface/);
+  assert.match(health, /--interface "\$STRICT_EGRESS_INTERFACE"/);
+  assert.match(health, /STRICT_EGRESS_HEALTHCHECK_URL/);
 });
 
 test('first enrollment recreates the egress without the Tailscale auth key', async () => {
@@ -71,6 +79,22 @@ test('first enrollment recreates the egress without the Tailscale auth key', asy
   assert.match(apply, /--force-recreate vpn-router-egress/);
   assert.match(apply, /egress_auth_key_scrubbed \|\| return 1/);
   assert.match(source, /\^tskey-auth-\[A-Za-z0-9_-\]\{20,/);
+});
+
+test('external egress adapters are health-checked but never lifecycle-owned', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  const preflightStart = source.indexOf('preflight_command()');
+  const preflightEnd = source.indexOf('capture_backup()', preflightStart);
+  const preflight = source.slice(preflightStart, preflightEnd);
+  assert.match(preflight, /STRICT_EGRESS_TYPE" == socks5/);
+  assert.match(preflight, /STRICT_EGRESS_TYPE" == linux_interface/);
+
+  const applyStart = source.indexOf('apply_runtime()');
+  const applyEnd = source.indexOf('if ! apply_runtime', applyStart);
+  const apply = source.slice(applyStart, applyEnd);
+  assert.match(apply, /if uses_managed_tailscale; then\s+compose up -d vpn-router-egress/);
+  assert.match(apply, /wait_for_socks_egress \|\| return 1/);
+  assert.doesNotMatch(apply, /docker (?:stop|rm).*STRICT_EGRESS/);
 });
 
 test('the rollback deadman is armed before the first live runtime step', async () => {

@@ -16,8 +16,9 @@ All notable changes are documented here.
   preserves the VPN and Tailscale enrollment state.
 - Report the configured scope mode, entry count, strict egress type, resource
   health, and drift without exposing credentials.
-- Expand the disposable redirect lab to two selected clients and one excluded
-  control client, including fail-closed egress and capture outages.
+- Expand the disposable external-SOCKS5 redirect lab to two selected clients
+  and one excluded control client, including fail-closed egress and capture
+  outages, then prove explicit whole-subnet selection and staged-scope restore.
 - Publish the production contract, readiness gates, staged rollout model, and
   honest managed-adapter boundary.
 - Add schema-checked complete examples for an external SOCKS5 exit and a

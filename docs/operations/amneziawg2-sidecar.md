@@ -20,9 +20,10 @@ compete for one namespace's default route.
   --interface awg0
 ```
 
-The managed lifecycle performs stricter checks: one `/32`, no global IPv6 on
-the interface, required `ip`/`nft` tools, collision-free owned resources,
-available Tailscale enrollment, and a rollback deadman.
+The managed lifecycle performs stricter checks: an explicit client list or VPN
+subnet, no global IPv6 on the interface, required `ip`/`nft` tools,
+collision-free owned resources, a healthy selected egress, and a rollback
+deadman.
 
 ## Import-key handling
 
@@ -48,10 +49,11 @@ to the new namespace until preflight, baseline, and canary are repeated.
 
 ## Validation status
 
-The disposable lab proves source `/32` matching, managed-DNS first-attempt
+The disposable lab proves multi-client source matching, managed-DNS first-attempt
 selection, TCP-redirect and SOCKS dependency, fail-closed behavior for both
 outages, direct-path continuity, out-of-scope-client isolation, selected-address
-persistence after managed DNS stops, and full cleanup. Native Linux and live canary results must still be recorded
+persistence after managed DNS stops, an external SOCKS5 data path, and full
+cleanup. Native Linux and live canary results must still be recorded
 for each deployment; no generic lab result makes a host production-ready.
 
 ## Upstream references

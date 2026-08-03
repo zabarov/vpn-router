@@ -45,7 +45,7 @@ test('the published JSON Schema rejects Tailscale-only fields on direct egress',
 test('provider-neutral deployment examples satisfy schema and semantic validation', async () => {
   const { schema } = await loadSchemaAndExample();
   const validateSchema = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
-  for (const relativePath of ['../examples/config.socks5.yaml', '../examples/config.linux-interface.yaml']) {
+  for (const relativePath of ['../examples/config.socks5.yaml', '../examples/config.linux-interface.yaml', '../lab/redirect/config.subnet.yaml']) {
     const example = parse(await readFile(new URL(relativePath, import.meta.url), 'utf8'));
     assert.equal(validateSchema(example), true, `${relativePath}: ${JSON.stringify(validateSchema.errors)}`);
     assert.deepEqual(validateConfig(example), { valid: true, errors: [] }, relativePath);

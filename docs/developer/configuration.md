@@ -113,8 +113,11 @@ egresses:
     healthcheck_url: https://example.com/
 ```
 
-The generators support all three adapters. The bundled transactional lifecycle
-currently manages only the AmneziaWG2 plus Tailscale reference combination.
+The generators support all three adapters. With an `amneziawg2_container`
+source, the bundled transactional lifecycle manages the Tailscale sidecar and
+treats SOCKS5 services or tunnel interfaces as external dependencies. It
+health-checks external dependencies but never starts, stops, or reconfigures
+them.
 
 ## Destination sets
 

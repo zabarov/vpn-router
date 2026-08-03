@@ -87,11 +87,7 @@ if [[ "$SOURCE_TYPE" != amneziawg2_container ]]; then
   echo 'lifecycle=FAIL: managed apply currently supports amneziawg2_container; linux_interface remains a provider-neutral render adapter' >&2
   exit 1
 fi
-if [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]]; then
-  echo 'lifecycle=FAIL: the managed AmneziaWG2 adapter currently supports tailscale_socks; use rendered artifacts for an external egress adapter' >&2
-  exit 1
-fi
-if [[ "$TAILSCALE_PROXY_SERVER" != "${SERVICE_NAME}-egress" ]]; then
+if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks && "$TAILSCALE_PROXY_SERVER" != "${SERVICE_NAME}-egress" ]]; then
   echo "lifecycle=FAIL: proxy_server must equal ${SERVICE_NAME}-egress for the managed AmneziaWG2 adapter" >&2
   exit 1
 fi
@@ -110,6 +106,10 @@ readonly EGRESS_STATE="$STATE_ROOT/egress-tailscale"
 readonly DEADMAN_UNIT="${SERVICE_NAME}-deadman"
 
 auth_key=${!TAILSCALE_AUTH_KEY_ENV-}
+
+uses_managed_tailscale() {
+  [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]
+}
 
 compose() {
   env \
@@ -292,13 +292,32 @@ require_unowned_or_managed_state() {
 preflight_command() {
   require_base_runtime
   require_unowned_or_managed_state
-  if [[ -n "$auth_key" && ! "$auth_key" =~ ^tskey-auth-[A-Za-z0-9_-]{20,}$ ]]; then
-    echo "preflight=FAIL: $TAILSCALE_AUTH_KEY_ENV is not a valid Tailscale auth key" >&2
-    return 1
-  fi
-  if [[ -z "$auth_key" && ! -s "$EGRESS_STATE/tailscaled.state" ]]; then
-    echo "preflight=FAIL: neither $TAILSCALE_AUTH_KEY_ENV nor enrolled Tailscale state is available" >&2
-    return 1
+  if uses_managed_tailscale; then
+    if [[ -n "$auth_key" && ! "$auth_key" =~ ^tskey-auth-[A-Za-z0-9_-]{20,}$ ]]; then
+      echo "preflight=FAIL: $TAILSCALE_AUTH_KEY_ENV is not a valid Tailscale auth key" >&2
+      return 1
+    fi
+    if [[ -z "$auth_key" && ! -s "$EGRESS_STATE/tailscaled.state" ]]; then
+      echo "preflight=FAIL: neither $TAILSCALE_AUTH_KEY_ENV nor enrolled Tailscale state is available" >&2
+      return 1
+    fi
+  elif [[ "$STRICT_EGRESS_TYPE" == socks5 ]]; then
+    source_exec curl -4fsS --globoff --connect-timeout 5 --max-time 10 \
+      --socks5-hostname "$STRICT_EGRESS_SERVER:$STRICT_EGRESS_PORT" \
+      "$STRICT_EGRESS_HEALTHCHECK_URL" >/dev/null || {
+      echo 'preflight=FAIL: external SOCKS5 egress health check failed' >&2
+      return 1
+    }
+  elif [[ "$STRICT_EGRESS_TYPE" == linux_interface ]]; then
+    source_exec ip -o link show dev "$STRICT_EGRESS_INTERFACE" >/dev/null || {
+      echo 'preflight=FAIL: strict egress interface is unavailable in the source namespace' >&2
+      return 1
+    }
+    source_exec curl -4fsS --globoff --connect-timeout 5 --max-time 10 \
+      --interface "$STRICT_EGRESS_INTERFACE" "$STRICT_EGRESS_HEALTHCHECK_URL" >/dev/null || {
+      echo 'preflight=FAIL: strict egress interface health check failed' >&2
+      return 1
+    }
   fi
   command -v systemd-run >/dev/null || {
     echo 'preflight=FAIL: systemd-run is required for the rollback deadman' >&2
@@ -434,15 +453,30 @@ wait_for_tailscale() {
 }
 
 wait_for_socks_egress() {
-  local _attempt proxy_ip='' consecutive=0
+  local _attempt proxy_ip='' consecutive=0 healthy=false
   for _attempt in {1..45}; do
-    proxy_ip=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$PROXY_NETWORK\"}}{{.IPAddress}}{{end}}" "$EGRESS_NAME" 2>/dev/null || true)
-    if [[ -n "$proxy_ip" ]] && source_exec curl -4fsS \
-      --globoff \
-      --connect-timeout 5 \
-      --max-time 10 \
-      --socks5-hostname "$proxy_ip:$TAILSCALE_PROXY_PORT" \
-      "$TAILSCALE_HEALTHCHECK_URL" >/dev/null 2>&1; then
+    healthy=false
+    if uses_managed_tailscale; then
+      proxy_ip=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$PROXY_NETWORK\"}}{{.IPAddress}}{{end}}" "$EGRESS_NAME" 2>/dev/null || true)
+      if [[ -n "$proxy_ip" ]] && source_exec curl -4fsS --globoff --connect-timeout 5 --max-time 10 \
+        --socks5-hostname "$proxy_ip:$STRICT_EGRESS_PORT" "$STRICT_EGRESS_HEALTHCHECK_URL" >/dev/null 2>&1; then
+        healthy=true
+      fi
+    elif [[ "$STRICT_EGRESS_TYPE" == socks5 ]]; then
+      if source_exec curl -4fsS --globoff --connect-timeout 5 --max-time 10 \
+        --socks5-hostname "$STRICT_EGRESS_SERVER:$STRICT_EGRESS_PORT" "$STRICT_EGRESS_HEALTHCHECK_URL" >/dev/null 2>&1; then
+        healthy=true
+      fi
+    elif [[ "$STRICT_EGRESS_TYPE" == linux_interface ]]; then
+      if source_exec curl -4fsS --globoff --connect-timeout 5 --max-time 10 \
+        --interface "$STRICT_EGRESS_INTERFACE" "$STRICT_EGRESS_HEALTHCHECK_URL" >/dev/null 2>&1; then
+        healthy=true
+      fi
+    else
+      echo 'apply=FAIL: unsupported strict egress type reached runtime verification' >&2
+      return 1
+    fi
+    if [[ "$healthy" == true ]]; then
       consecutive=$((consecutive + 1))
       if ((consecutive >= 3)); then return 0; fi
     else
@@ -450,7 +484,7 @@ wait_for_socks_egress() {
     fi
     sleep 2
   done
-  echo 'apply=FAIL: Tailscale SOCKS did not pass three consecutive HTTPS health checks' >&2
+  echo 'apply=FAIL: strict egress did not pass three consecutive HTTPS health checks' >&2
   return 1
 }
 
@@ -481,21 +515,15 @@ verify_internal() {
   owned_table_exists || return 1
   container_running "$CAPTURE_NAME" || return 1
   container_running "$DNS_NAME" || return 1
-  container_running "$EGRESS_NAME" || return 1
-  egress_auth_key_scrubbed || return 1
-  source_on_proxy_network || return 1
-  docker exec "$EGRESS_NAME" tailscale status --json 2>/dev/null \
-    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.BackendState==="Running"&&j.ExitNodeStatus?.Online===true?0:1)}catch{process.exit(1)}})' \
-    || return 1
-  local proxy_ip
-  proxy_ip=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$PROXY_NETWORK\"}}{{.IPAddress}}{{end}}" "$EGRESS_NAME" 2>/dev/null) || return 1
-  [[ -n "$proxy_ip" ]] || return 1
-  source_exec curl -4fsS \
-    --globoff \
-    --connect-timeout 5 \
-    --max-time 10 \
-    --socks5-hostname "$proxy_ip:$TAILSCALE_PROXY_PORT" \
-    "$TAILSCALE_HEALTHCHECK_URL" >/dev/null || return 1
+  if uses_managed_tailscale; then
+    container_running "$EGRESS_NAME" || return 1
+    egress_auth_key_scrubbed || return 1
+    source_on_proxy_network || return 1
+    docker exec "$EGRESS_NAME" tailscale status --json 2>/dev/null \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);process.exit(j.BackendState==="Running"&&j.ExitNodeStatus?.Online===true?0:1)}catch{process.exit(1)}})' \
+      || return 1
+  fi
+  wait_for_socks_egress >/dev/null || return 1
 }
 
 cancel_deadman_timer() {
@@ -640,31 +668,33 @@ apply_command() {
 
   apply_runtime() {
     local source_default_before source_default_after
-    compose up -d vpn-router-egress || return 1
-    wait_for_tailscale || return 1
-    if [[ -n "$auth_key" ]]; then
-      auth_key=''
-      unset "$TAILSCALE_AUTH_KEY_ENV"
-      compose up -d --force-recreate vpn-router-egress || return 1
+    if uses_managed_tailscale; then
+      compose up -d vpn-router-egress || return 1
       wait_for_tailscale || return 1
-      egress_auth_key_scrubbed || return 1
-    fi
-    source_default_before=$(source_exec ip -j route show default | sha256sum | awk '{print $1}') || return 1
-    if ! source_on_proxy_network; then
-      docker network connect --gw-priority -1 "$PROXY_NETWORK" "$SOURCE_CONTAINER" || return 1
+      if [[ -n "$auth_key" ]]; then
+        auth_key=''
+        unset "$TAILSCALE_AUTH_KEY_ENV"
+        compose up -d --force-recreate vpn-router-egress || return 1
+        wait_for_tailscale || return 1
+        egress_auth_key_scrubbed || return 1
+      fi
+      source_default_before=$(source_exec ip -j route show default | sha256sum | awk '{print $1}') || return 1
+      if ! source_on_proxy_network; then
+        docker network connect --gw-priority -1 "$PROXY_NETWORK" "$SOURCE_CONTAINER" || return 1
+        write_manifest applying "$backup_dir" true || return 1
+      fi
+      source_default_after=$(source_exec ip -j route show default | sha256sum | awk '{print $1}') || return 1
+      [[ "$source_default_before" == "$source_default_after" ]] || return 1
       write_manifest applying "$backup_dir" true || return 1
+      docker run --rm --network "container:$SOURCE_CONTAINER" "$ALPINE_IMAGE" \
+        nc -z -w 3 "$TAILSCALE_PROXY_SERVER" "$TAILSCALE_PROXY_PORT" || return 1
     fi
-    source_default_after=$(source_exec ip -j route show default | sha256sum | awk '{print $1}') || return 1
-    [[ "$source_default_before" == "$source_default_after" ]] || return 1
-    write_manifest applying "$backup_dir" true || return 1
-    docker run --rm --network "container:$SOURCE_CONTAINER" "$ALPINE_IMAGE" \
-      nc -z -w 3 "$TAILSCALE_PROXY_SERVER" "$TAILSCALE_PROXY_PORT" || return 1
     wait_for_socks_egress || return 1
     source_exec nft -f - <"$ARTIFACT_DIR/vpn-router.nft" || return 1
     compose up -d vpn-router-dns vpn-router || return 1
     container_running "$CAPTURE_NAME" || return 1
     container_running "$DNS_NAME" || return 1
-    write_manifest applied "$backup_dir" true || return 1
+    write_manifest applied "$backup_dir" "$(uses_managed_tailscale && echo true || echo false)" || return 1
     verify_internal || return 1
   }
 
@@ -699,7 +729,11 @@ status_command() {
   echo "source_container_running=$(container_running "$SOURCE_CONTAINER" && echo true || echo false)"
   echo "capture_running=$(container_running "$CAPTURE_NAME" && echo true || echo false)"
   echo "dns_running=$(container_running "$DNS_NAME" && echo true || echo false)"
-  echo "egress_running=$(container_running "$EGRESS_NAME" && echo true || echo false)"
+  if uses_managed_tailscale; then
+    echo "egress_running=$(container_running "$EGRESS_NAME" && echo true || echo false)"
+  else
+    echo 'egress_running=external'
+  fi
   echo "nftables_table_present=$(owned_table_exists && echo true || echo false)"
   echo "source_proxy_connected=$(source_on_proxy_network && echo true || echo false)"
   [[ "$drifted" == false ]]
