@@ -48,3 +48,10 @@ test('container namespaces pin the managed SOCKS address instead of depending on
   assert.match(lifecycle, /delete outbound\.domain_resolver/);
   assert.match(lifecycle, /start_egress; pin_tailscale_proxy_ip; attach_sources/);
 });
+
+test('strict egress readiness tolerates startup DNS delay and requires stable recovery', () => {
+  assert.match(lifecycle, /healthcheck_group_once\(\)/);
+  assert.match(lifecycle, /for _attempt in \{1\.\.30\}/);
+  assert.match(lifecycle, /consecutive >= 3/);
+  assert.match(lifecycle, /consecutive=0/);
+});

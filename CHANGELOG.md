@@ -17,6 +17,9 @@ All notable changes are documented here.
   selection, strict SOCKS routing, and fail-closed SOCKS/capture outages.
 - Keep the existing VPN containers, their configuration, ports, default routes,
   and persisted Tailscale enrollment outside VPN Router ownership.
+- Wait for three consecutive strict-egress health checks during startup so a
+  transient userspace-exit DNS delay triggers bounded retry instead of an
+  unnecessary transaction rollback.
 
 ## 0.4.0-pre-alpha - Unreleased
 

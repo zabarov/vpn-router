@@ -1,5 +1,14 @@
 # Troubleshooting
 
+## Enable rolls back while the Tailscale exit is starting
+
+The lifecycle waits for three consecutive strict-egress health checks and
+retries for up to one minute. A temporary DNS delay inside a newly started
+userspace exit should recover without operator action. If enable still rolls
+back, inspect the root-only failure directory reported by the command and test
+the configured health-check URL through the selected exit. Do not bypass the
+health check or change `failure_mode` to direct.
+
 ## Discovery found no source
 
 Run `sudo vpn-router discover --json`. A tunnel container must be running and

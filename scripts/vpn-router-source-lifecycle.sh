@@ -351,7 +351,7 @@ attach_sources() {
   done < <(groups_tsv)
 }
 
-healthcheck_group() {
+healthcheck_group_once() {
   local namespace=$1 container=$2 url server port interface
   url=$(json_value strict_egress.healthcheck_url)
   case "$STRICT_EGRESS_TYPE" in
@@ -359,6 +359,20 @@ healthcheck_group() {
     socks5) server=$(json_value strict_egress.server); port=$(json_value strict_egress.port); group_exec "$namespace" "$container" curl -4fsS --connect-timeout 5 --max-time 15 --socks5-hostname "$server:$port" "$url" >/dev/null ;;
     linux_interface) interface=$(json_value strict_egress.interface); group_exec "$namespace" "$container" curl -4fsS --connect-timeout 5 --max-time 15 --interface "$interface" "$url" >/dev/null ;;
   esac
+}
+
+healthcheck_group() {
+  local namespace=$1 container=$2 consecutive=0
+  for _attempt in {1..30}; do
+    if healthcheck_group_once "$namespace" "$container"; then
+      consecutive=$((consecutive + 1))
+      ((consecutive >= 3)) && return 0
+    else
+      consecutive=0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 capture_failure_diagnostics() {
