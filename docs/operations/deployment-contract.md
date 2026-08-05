@@ -5,22 +5,21 @@
 One validated YAML file produces:
 
 ```sh
-node bin/vpn-router.mjs render-sing-box --config ./router.yaml
-node bin/vpn-router.mjs render-nftables --config ./router.yaml
+node bin/vpn-router.mjs render-sing-box --config ./router.yaml --source <tag>
+node bin/vpn-router.mjs render-nftables --config ./router.yaml --source <tag>
 node bin/vpn-router.mjs render-dnsmasq --config ./router.yaml
-node bin/vpn-router.mjs render-runtime-env --config ./router.yaml
+node bin/vpn-router.mjs render-runtime-plan --config ./router.yaml
 ```
 
-The first three outputs contain no Tailscale auth key. `render-runtime-env`
-contains validated topology identifiers only and is consumed by the lifecycle;
-it never emits the credential value.
+These outputs contain no Tailscale auth key. The runtime plan contains validated
+topology identifiers only; it never emits a credential value.
 
 ## Owned resources
 
 A Tailscale-backed managed deployment owns only:
 
 - `table inet <resources.nftables_table>`;
-- containers `<service_name>`, `<service_name>-dns`, and
+- one capture and optional DNS container per source namespace, plus
   `<service_name>-egress`;
 - Docker networks `<service_name>-control` and `<service_name>-proxy`;
 - `/var/lib/<service_name>/`.
@@ -30,21 +29,20 @@ Docker networks are not created. The external service or interface is checked
 before and after enable but remains operator-owned and is never stopped or
 reconfigured by VPN Router.
 
-The source AmneziaWG2 container is borrowed, not owned. For Tailscale, connecting it to the
-internal proxy network is recorded separately and uses negative gateway
+Every source VPN or proxy container is borrowed, not owned. For Tailscale,
+connecting a container source to the internal proxy network is recorded and uses negative gateway
 priority. The lifecycle compares its default-route fingerprint before and
 after that connection.
 
-For a host `linux_interface` source, capture and DNS sidecars use host
+For a host `tunnel_interface` source, capture and DNS sidecars use host
 networking and the one owned nftables table lives in the host namespace. The
 source VPN interface remains borrowed: VPN Router does not create, restart,
-reconfigure, or delete it. Managed Tailscale is not exposed in this topology;
-the strict egress must be an external SOCKS5 service or a different existing
-tunnel interface.
+reconfigure, or delete it. Managed Tailscale exposes a loopback-only SOCKS port
+for host sources and the private proxy network for container sources.
 
-The internal proxy network has no host-published port. Only the source
-namespace and Tailscale egress join it. Tailscale also joins a separate control
-network and runs in userspace mode.
+The internal proxy network is available only to container sources and the
+Tailscale egress. Any host listener is bound to loopback only. Tailscale also
+joins a separate control network and runs in userspace mode.
 
 ## Apply transaction
 
@@ -60,13 +58,14 @@ network and runs in userspace mode.
    and a successful Tailnet ping to that exit. After first enrollment, recreate
    the egress from its persisted state with an empty `TS_AUTHKEY`, then verify
    that the credential is absent from the container environment.
-6. For Tailscale, connect the source to the internal proxy network without changing its
+6. For Tailscale, connect each container source to the internal proxy network without changing its
    default route, then prove both the SOCKS port and the configured HTTPS
    health check through SOCKS. For an external SOCKS5 or Linux-interface
    egress, run three consecutive adapter-specific HTTPS checks without creating
    or changing the external dependency.
-7. Apply the one owned nftables table. No policy rule or route table is added.
-8. Start the capture sidecar and, when required by policy, the DNS sidecar.
+7. Apply one identically named owned nftables table in each distinct source
+   namespace. No policy rule or route table is added.
+8. Start per-namespace capture and, when required, DNS sidecars.
    Verify every owned component and mark the manifest `applied`.
 
 Any failure after the intent manifest triggers rollback. Repeating `apply` with
@@ -76,9 +75,9 @@ copy for verification or rollback before applying a new revision.
 
 ## Rollback transaction
 
-1. Stop and remove the capture and DNS sidecars.
-2. If the source container ID still matches the manifest, delete the one owned
-   nftables table and proxy-network connection.
+1. Stop and remove every owned capture and DNS sidecar.
+2. If each source container ID still matches the manifest, delete the owned
+   nftables table and proxy-network connection in that namespace.
 3. Remove the project Compose objects, including the Tailscale container and
    two project networks when that adapter was selected. Never stop an external
    SOCKS5 service or tunnel interface.
@@ -96,8 +95,8 @@ Rollback is safe to repeat. It returns `ALREADY_ROLLED_BACK` for a verified
 completed rollback and `ALREADY_ABSENT` when no manifest exists.
 
 The lifecycle never flushes the global nftables ruleset, changes the host
-default route or DNS, deletes unrelated Docker resources, modifies the
-AmneziaWG2 profile, or removes Tailscale state.
+default route or DNS, deletes unrelated Docker resources, modifies source VPN
+or proxy configuration, or removes Tailscale state.
 
 ## Installed release and boot ownership
 

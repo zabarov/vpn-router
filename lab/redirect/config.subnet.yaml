@@ -1,10 +1,11 @@
-schema_version: "1.0"
+schema_version: "2.0"
 
 sources:
   - tag: lab-source
-    type: linux_interface
+    type: tunnel_interface
+    namespace: host
     interface: awg0
-    client_scope:
+    clients:
       mode: subnet
       subnet: 10.8.1.0/24
 
@@ -23,12 +24,12 @@ egresses:
 
 policies:
   - tag: strict
-    source: lab-source
+    sources: [lab-source]
     destination_sets: [strict-target]
     egress: strict-egress
     failure_mode: block
   - tag: default
-    source: lab-source
+    sources: [lab-source]
     destination_sets: [default]
     egress: direct
     failure_mode: direct

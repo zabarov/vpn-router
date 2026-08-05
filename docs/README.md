@@ -7,6 +7,7 @@
 - [Troubleshooting](operations/troubleshooting.md)
 - [Live validation gate](operations/live-validation.md)
 - [Sanitized pre-alpha validation report](operations/validation-report.md)
+- [0.5 multi-source validation report](operations/validation-report-0.5.md)
 - [AmneziaWG2 adapter](operations/amneziawg2-sidecar.md)
 - [Deployment ownership and rollback contract](operations/deployment-contract.md)
 

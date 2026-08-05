@@ -5,7 +5,7 @@
 .env.*
 !.env.example
 source/
-output/
+/output/
 build/
 private/
 node_modules/

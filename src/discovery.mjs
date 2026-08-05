@@ -46,6 +46,12 @@ function looksLikeVpnInterface(name) {
   return /^(?:awg|wg|tun|tap)[a-z0-9_.-]*$/i.test(name);
 }
 
+function looksLikeProxyContainer(name, image) {
+  const identity = `${name} ${image}`;
+  return /(?:^|[-_.])(xray|v2ray)(?:$|[-_.])/i.test(identity)
+    || /amnezia.*(?:xray|v2ray)|(?:xray|v2ray).*amnezia/i.test(identity);
+}
+
 async function readAllowedIps(runner, container, interfaceName) {
   for (const utility of ['awg', 'wg']) {
     try {
@@ -57,7 +63,7 @@ async function readAllowedIps(runner, container, interfaceName) {
   return [];
 }
 
-export async function discoverAmneziaSources({ runner = defaultRunner } = {}) {
+export async function discoverVpnSources({ runner = defaultRunner } = {}) {
   let containers;
   try {
     containers = parseDockerRows(await runner('docker', ['ps', '--format', '{{json .}}']));
@@ -70,6 +76,15 @@ export async function discoverAmneziaSources({ runner = defaultRunner } = {}) {
     const name = container.Names || container.Name;
     const image = container.Image || '';
     if (!name) continue;
+    if (looksLikeProxyContainer(name, image)) {
+      candidates.push({
+        source_type: 'container_egress',
+        container_name: name,
+        container_image: image,
+        clients: { mode: 'all' }
+      });
+      continue;
+    }
     let interfaces;
     try {
       interfaces = JSON.parse(await runner('docker', ['exec', name, 'ip', '-j', '-4', 'addr', 'show']));
@@ -84,7 +99,8 @@ export async function discoverAmneziaSources({ runner = defaultRunner } = {}) {
         const subnet = networkCidr(address.local, address.prefixlen);
         if (!subnet) continue;
         candidates.push({
-          source_type: 'amneziawg2_container',
+          source_type: 'tunnel_interface',
+          namespace: 'container',
           container_name: name,
           container_image: image,
           interface: item.ifname,
@@ -97,3 +113,6 @@ export async function discoverAmneziaSources({ runner = defaultRunner } = {}) {
   }
   return candidates;
 }
+
+// Compatibility export for integrations written before schema version 2.
+export const discoverAmneziaSources = discoverVpnSources;

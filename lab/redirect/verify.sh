@@ -32,7 +32,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
-node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_SING_BOX_CONFIG"
+node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$lab_dir/config.yaml" --source lab-source >"$VPN_ROUTER_LAB_SING_BOX_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_DNSMASQ_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.subnet.yaml" >"$subnet_nftables_config"
 # The 0700 parent limits host visibility. Read-only
@@ -66,6 +66,20 @@ assert_blocked() {
   fi
 }
 
+wait_response() {
+  client=$1
+  target=$2
+  expected=$3
+  attempt=0
+  while [ "$attempt" -lt 20 ]; do
+    if actual=$(fetch "$client" "$target" 2>/dev/null) && [ "$actual" = "$expected" ]; then return 0; fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  echo "FAIL: $client did not recover the expected response from $target" >&2
+  return 1
+}
+
 resolve_strict() {
   docker compose -f "$compose_file" exec -T source \
     ip netns exec canary-client nslookup strict.test 192.0.2.53 \
@@ -91,9 +105,8 @@ assert_response selected-client 172.30.20.30 direct-target
 assert_response control-client 172.30.20.20 strict-target
 
 docker compose -f "$compose_file" start socks-egress >/dev/null
-sleep 2
-assert_response canary-client 172.30.20.20 strict-target
-assert_response selected-client 172.30.20.20 strict-target
+wait_response canary-client 172.30.20.20 strict-target
+wait_response selected-client 172.30.20.20 strict-target
 if [ "$(docker compose -f "$compose_file" ps -q sidecar)" != "$sidecar_id" ]; then
   echo "FAIL: strict recovery restarted the redirect sidecar instead of re-resolving the SOCKS service" >&2
   exit 1

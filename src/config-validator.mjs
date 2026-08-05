@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { normalizeConfig, policySources } from './config-normalizer.mjs';
 
 const tagPattern = /^[a-z][a-z0-9-]{1,62}$/;
 const environmentNamePattern = /^[A-Z][A-Z0-9_]{2,127}$/;
@@ -13,12 +14,15 @@ const captureFields = new Set(['type', 'listen_port']);
 const destinationSetFields = new Set(['ip_cidrs', 'domain_suffixes']);
 const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet', 'client_scope']);
 const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet', 'client_scope']);
+const tunnelSourceFields = new Set(['tag', 'type', 'namespace', 'container_name', 'interface', 'clients']);
+const containerEgressSourceFields = new Set(['tag', 'type', 'container_name', 'clients']);
 const clientScopeFields = new Set(['mode', 'addresses', 'subnet']);
 const directEgressFields = new Set(['tag', 'type']);
 const tailscaleEgressFields = new Set(['tag', 'type', 'auth_key_env', 'exit_node', 'proxy_server', 'proxy_port', 'healthcheck_url']);
 const socksEgressFields = new Set(['tag', 'type', 'server', 'port', 'healthcheck_url']);
 const interfaceEgressFields = new Set(['tag', 'type', 'interface', 'healthcheck_url']);
-const policyFields = new Set(['tag', 'source', 'destination_sets', 'egress', 'failure_mode']);
+const legacyPolicyFields = new Set(['tag', 'source', 'destination_sets', 'egress', 'failure_mode']);
+const policyFields = new Set(['tag', 'sources', 'destination_sets', 'egress', 'failure_mode']);
 const trafficHandlingFields = new Set(['udp_quic', 'ipv6', 'dns_mode']);
 const resourceFields = new Set(['nftables_table', 'service_name']);
 
@@ -77,6 +81,22 @@ function isCanonicalIpv4Subnet(value) {
 
 function validateClientScope(source, errors) {
   const label = `source ${source.tag ?? '<unknown>'}`;
+  if (source.type === 'container_egress') {
+    if (!isObject(source.clients) || source.clients.mode !== 'all' || Object.keys(source.clients).some((key) => key !== 'mode')) {
+      errors.push(`${label} container_egress clients must declare only mode all`);
+    }
+    return;
+  }
+  if (source.clients !== undefined) {
+    if (!isObject(source.clients)) {
+      errors.push(`${label} clients must be an object`);
+      return;
+    }
+    const compatibilitySource = { ...source, client_scope: source.clients };
+    delete compatibilitySource.clients;
+    validateClientScope(compatibilitySource, errors);
+    return;
+  }
   const hasLegacyScope = source.client_subnet !== undefined;
   const hasClientScope = source.client_scope !== undefined;
   if (hasLegacyScope === hasClientScope) {
@@ -124,11 +144,24 @@ function validHttpsUrl(value) {
   }
 }
 
-export function validateConfig(config) {
+export function validateConfig(input) {
   const errors = [];
+  if (!isObject(input)) return { valid: false, errors: ['configuration must be a YAML object'] };
+  rejectUnknownKeys(input, rootFields, 'configuration', errors);
+  if (!['1.0', '2.0'].includes(input.schema_version)) errors.push('schema_version must be "1.0" or "2.0"');
+  if (input.schema_version === '1.0') {
+    for (const source of input.sources ?? []) {
+      if (!isObject(source)) continue;
+      if (!['amneziawg2_container', 'linux_interface'].includes(source.type)) errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
+      if (source.type === 'amneziawg2_container') rejectUnknownKeys(source, amneziaSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+      if (source.type === 'linux_interface') rejectUnknownKeys(source, linuxSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+      validateClientScope(source, errors);
+    }
+    for (const policy of input.policies ?? []) rejectUnknownKeys(policy, legacyPolicyFields, `policy ${policy?.tag ?? '<unknown>'}`, errors);
+  }
+  const config = normalizeConfig(input);
   if (!isObject(config)) return { valid: false, errors: ['configuration must be a YAML object'] };
-  rejectUnknownKeys(config, rootFields, 'configuration', errors);
-  if (config.schema_version !== '1.0') errors.push('schema_version must be "1.0"');
+  if (config.schema_version !== '2.0') return { valid: false, errors };
 
   let requiredListsAreUsable = true;
   for (const key of ['sources', 'egresses', 'policies']) {
@@ -139,7 +172,6 @@ export function validateConfig(config) {
   }
   if (!requiredListsAreUsable) return { valid: false, errors };
 
-  if (config.sources.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one active source');
   if (config.policies.length !== 2) errors.push('the IPv4/TCP MVP requires exactly one strict policy and one default-direct policy');
 
   if (!isObject(config.capture) || config.capture.type !== 'redirect' || !Number.isInteger(config.capture.listen_port) || config.capture.listen_port < 1024 || config.capture.listen_port > 65535) {
@@ -175,14 +207,31 @@ export function validateConfig(config) {
 
   for (const source of config.sources) {
     if (!isObject(source)) continue;
-    if (!['amneziawg2_container', 'linux_interface'].includes(source.type)) errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
-    if (source.type === 'amneziawg2_container') rejectUnknownKeys(source, amneziaSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
-    if (source.type === 'linux_interface') rejectUnknownKeys(source, linuxSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
-    if (source.type === 'amneziawg2_container' && !containerNamePattern.test(source.container_name ?? '')) {
-      errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
+    if (!['tunnel_interface', 'container_egress'].includes(source.type)) errors.push(`source ${source.tag ?? '<unknown>'} has an unsupported type`);
+    if (source.type === 'tunnel_interface') rejectUnknownKeys(source, tunnelSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+    if (source.type === 'container_egress') rejectUnknownKeys(source, containerEgressSourceFields, `source ${source.tag ?? '<unknown>'}`, errors);
+    if (source.type === 'tunnel_interface' && !['host', 'container'].includes(source.namespace)) {
+      errors.push(`source ${source.tag ?? '<unknown>'} namespace must be host or container`);
     }
-    if (!interfaceNamePattern.test(source.interface ?? '')) errors.push(`source ${source.tag ?? '<unknown>'} requires a valid Linux interface name`);
+    const needsContainer = source.type === 'container_egress' || source.namespace === 'container';
+    if (needsContainer && !containerNamePattern.test(source.container_name ?? '')) errors.push(`source ${source.tag ?? '<unknown>'} requires container_name`);
+    if (!needsContainer && source.container_name !== undefined) errors.push(`source ${source.tag ?? '<unknown>'} host namespace cannot declare container_name`);
+    if (source.type === 'tunnel_interface' && !interfaceNamePattern.test(source.interface ?? '')) errors.push(`source ${source.tag ?? '<unknown>'} requires a valid Linux interface name`);
+    if (source.type === 'container_egress' && source.interface !== undefined) errors.push(`source ${source.tag ?? '<unknown>'} container_egress cannot declare interface`);
     validateClientScope(source, errors);
+  }
+  const sourceIdentities = new Set();
+  const containerNamespaces = new Set();
+  for (const source of config.sources.filter(isObject)) {
+    const identity = source.type === 'container_egress'
+      ? `container-egress:${source.container_name}`
+      : `${source.namespace}:${source.container_name ?? 'host'}:${source.interface}`;
+    if (sourceIdentities.has(identity)) errors.push(`source runtime identity is duplicated: ${identity}`);
+    sourceIdentities.add(identity);
+    if (source.container_name) {
+      if (containerNamespaces.has(source.container_name)) errors.push(`container namespace is assigned to more than one source: ${source.container_name}`);
+      containerNamespaces.add(source.container_name);
+    }
   }
 
   for (const egress of config.egresses) {
@@ -218,7 +267,13 @@ export function validateConfig(config) {
   for (const policy of config.policies) {
     if (!isObject(policy)) continue;
     rejectUnknownKeys(policy, policyFields, `policy ${policy.tag ?? '<unknown>'}`, errors);
-    if (!sourceTags.has(policy.source)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown source`);
+    const selectedSources = policySources(policy, config);
+    if (!Array.isArray(selectedSources) || selectedSources.length === 0) {
+      errors.push(`policy ${policy.tag ?? '<unknown>'} sources must be a non-empty list when declared`);
+    } else {
+      rejectDuplicates(selectedSources, `policy ${policy.tag ?? '<unknown>'} sources`, errors);
+      for (const source of selectedSources) if (!sourceTags.has(source)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown source: ${source}`);
+    }
     if (!egressTags.has(policy.egress)) errors.push(`policy ${policy.tag ?? '<unknown>'} references an unknown egress`);
     if (!Array.isArray(policy.destination_sets) || policy.destination_sets.length === 0) {
       errors.push(`policy ${policy.tag ?? '<unknown>'} requires destination_sets`);
@@ -252,14 +307,16 @@ export function validateConfig(config) {
     const defaultEgress = config.egresses.find((candidate) => candidate.tag === defaultPolicy.egress);
     if (defaultPolicy.failure_mode !== 'direct' || defaultEgress?.type !== 'direct') errors.push(`default policy ${defaultPolicy.tag ?? '<unknown>'} must use a direct egress with failure_mode direct`);
   }
-  if (strictPolicy && defaultPolicy && strictPolicy.source !== defaultPolicy.source) errors.push('strict and default policies must reference the same source');
-  const activeSource = config.sources.find(isObject);
-  const activeStrictEgress = strictEgresses[0];
-  if (activeSource?.type === 'linux_interface' && activeStrictEgress?.type === 'tailscale_socks') {
-    errors.push('a Linux interface source requires an external SOCKS5 or Linux-interface strict egress');
+  if (strictPolicy && defaultPolicy) {
+    const strictSources = [...policySources(strictPolicy, config)].sort();
+    const defaultSources = [...policySources(defaultPolicy, config)].sort();
+    if (JSON.stringify(strictSources) !== JSON.stringify(defaultSources)) errors.push('strict and default policies must reference the same sources');
   }
-  if (activeSource?.type === 'linux_interface' && activeStrictEgress?.type === 'linux_interface' && activeSource.interface === activeStrictEgress.interface) {
-    errors.push('source and strict egress interfaces must be different');
+  const activeStrictEgress = strictEgresses[0];
+  if (activeStrictEgress?.type === 'linux_interface') {
+    for (const source of config.sources.filter((candidate) => candidate.type === 'tunnel_interface' && candidate.namespace === 'host')) {
+      if (source.interface === activeStrictEgress.interface) errors.push(`source ${source.tag} and strict egress interfaces must be different`);
+    }
   }
   const referencedEgresses = new Set(config.policies.filter(isObject).map((policy) => policy.egress));
   for (const egress of config.egresses.filter(isObject)) {

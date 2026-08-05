@@ -2,6 +2,22 @@
 
 All notable changes are documented here.
 
+## 0.5.0-pre-alpha - Unreleased
+
+- Add schema version 2 with simultaneous `tunnel_interface` and
+  `container_egress` sources under one strict policy and one routing switch.
+- Add read-only discovery of AmneziaWG2, WireGuard-compatible tunnels, and
+  XRay/V2Ray containers without reading VPN credentials or proxy configuration.
+- Add fail-closed nftables `OUTPUT` capture for proxy containers, managed DNS,
+  routing-mark loop prevention, selected-UDP rejection, and IPv6 rejection.
+- Add a transactional multi-namespace lifecycle with shared egress, per-source
+  capture/DNS sidecars, source-container identity tracking, and reconciliation.
+- Add explicit, non-destructive migration from schema version 1.
+- Add a disposable proxy-container lab that proves direct isolation, first-DNS
+  selection, strict SOCKS routing, and fail-closed SOCKS/capture outages.
+- Keep the existing VPN containers, their configuration, ports, default routes,
+  and persisted Tailscale enrollment outside VPN Router ownership.
+
 ## 0.4.0-pre-alpha - Unreleased
 
 - Add a clean-host Debian/Ubuntu installer with an SHA-256-verified private

@@ -1,12 +1,14 @@
 # Troubleshooting
 
-## Discovery found no source or more than one source
+## Discovery found no source
 
-Run `sudo vpn-router discover --json`. The source container must be running and
-contain `ip` plus either `awg` or `wg`. Discovery only considers IPv4
-interfaces whose names begin with `awg`, `wg`, `tun`, or `tap`.
+Run `sudo vpn-router discover --json`. A tunnel container must be running and
+contain `ip` plus either `awg` or `wg`. Tunnel discovery considers IPv4
+interfaces beginning with `awg`, `wg`, `tun`, or `tap`. XRay/V2Ray discovery
+uses the running container name and image only; it never reads proxy config.
 
-If there is more than one candidate, select the intended values explicitly:
+Multiple supported candidates are expected: the version-2 wizard selects them
+together. To configure one explicit legacy tunnel source instead, use:
 
 ```sh
 sudo vpn-router configure \
@@ -86,7 +88,7 @@ at enable time. Use the root-only copy to inspect or disable the old deployment:
 
 ```sh
 sudo vpn-router disable \
-  --config /var/lib/<service_name>/runtime/config.yaml
+  --config /var/lib/<service_name>/runtime/multi-source-config.yaml
 ```
 
 Then validate and enable the new `/etc/vpn-router/router.yaml` with a deadman.

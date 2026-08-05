@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
-readonly DNS_IMAGE='vpn-router-dns:0.4.0-pre-alpha'
+readonly DNS_IMAGE='vpn-router-dns:0.5.0-pre-alpha'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
@@ -64,6 +64,17 @@ if [[ -z "$config_path" || ! -f "$config_path" ]]; then
   exit 2
 fi
 config_path=$(cd -- "$(dirname -- "$config_path")" && pwd)/$(basename -- "$config_path")
+
+# Schema 2 uses the multi-source transactional engine. Schema 1 keeps the
+# established compatibility lifecycle and can be migrated explicitly.
+eval "$("$node_bin" "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path")"
+if [[ "$CONFIG_SCHEMA_VERSION" == 2.0 ]]; then
+  multi_args=("$command_name" --config "$config_path")
+  [[ -z "$rollback_after" ]] || multi_args+=(--rollback-after "$rollback_after")
+  [[ "$cancel_deadman" == false ]] || multi_args+=(--cancel-deadman)
+  [[ "$deadman_call" == false ]] || multi_args+=(--deadman-call)
+  exec "$script_dir/vpn-router-source-lifecycle.sh" "${multi_args[@]}"
+fi
 
 # Work from one private immutable snapshot so validation, rendering, manifest
 # hashing, and the deadman cannot observe different revisions of the file.
@@ -236,9 +247,15 @@ normalize_network_json() {
       "preferred_life_time",
       "valid_life_time"
     ]);
+    const isEphemeralContainerLink = (value) => value !== null
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && ([value.ifname, value.dev].some((name) =>
+        typeof name === "string" && name.startsWith("veth")));
     const normalize = (value) => {
       if (Array.isArray(value)) {
-        return value.map(normalize).sort((left, right) =>
+        return value.filter((entry) => !isEphemeralContainerLink(entry))
+          .map(normalize).sort((left, right) =>
           JSON.stringify(left).localeCompare(JSON.stringify(right)));
       }
       if (value !== null && typeof value === "object") {

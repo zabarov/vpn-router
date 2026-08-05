@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
-import { applyPreset, parseArgs } from '../bin/vpn-router-configure.mjs';
+import { applyPreset, buildConfig, parseArgs } from '../bin/vpn-router-configure.mjs';
 
 const configurePath = new URL('../bin/vpn-router-configure.mjs', import.meta.url);
 const commandPath = new URL('../scripts/vpn-router-command.sh', import.meta.url);
@@ -30,7 +30,8 @@ test('non-interactive wizard creates a private validated Tailscale canary config
     assert.equal(mode, 0o600);
     const config = parse(await readFile(output, 'utf8'));
     assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
-    assert.deepEqual(config.sources[0].client_scope.addresses, ['10.9.0.2/32', '10.9.0.3/32']);
+    assert.equal(config.schema_version, '2.0');
+    assert.deepEqual(config.sources[0].clients.addresses, ['10.9.0.2/32', '10.9.0.3/32']);
     assert.equal(config.egresses[0].proxy_server, 'regional-router-egress');
     assert.equal(config.egresses[0].auth_key_env, 'VPN_ROUTER_TAILSCALE_AUTH_KEY');
     assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.example']);
@@ -67,9 +68,10 @@ test('wizard renders provider-neutral external SOCKS5 and Linux source values', 
     assert.equal(result.status, 0, result.stderr);
     const config = parse(await readFile(output, 'utf8'));
     assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
-    assert.equal(config.sources[0].type, 'linux_interface');
+    assert.equal(config.sources[0].type, 'tunnel_interface');
+    assert.equal(config.sources[0].namespace, 'host');
     assert.equal(config.sources[0].container_name, undefined);
-    assert.deepEqual(config.sources[0].client_scope, { mode: 'subnet', subnet: '10.20.0.0/24' });
+    assert.deepEqual(config.sources[0].clients, { mode: 'subnet', subnet: '10.20.0.0/24' });
     assert.equal(config.egresses[0].type, 'socks5');
     assert.equal(config.egresses[0].server, 'proxy.internal');
     assert.equal(config.egresses[0].port, 1081);
@@ -126,7 +128,7 @@ test('amnezia-tailscale preset requires explicit real topology in non-interactiv
     assert.equal(result.status, 0, result.stderr);
     const config = parse(await readFile(output, 'utf8'));
     assert.equal(config.sources[0].container_name, 'amnezia-awg');
-    assert.deepEqual(config.sources[0].client_scope.addresses, ['10.8.1.9/32']);
+    assert.deepEqual(config.sources[0].clients.addresses, ['10.8.1.9/32']);
     assert.equal(config.egresses[0].type, 'tailscale_socks');
     assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.service.example']);
   } finally {
@@ -182,6 +184,35 @@ test('all-clients shortcut uses the subnet discovered from Amnezia', async () =>
   }]);
   assert.equal(configured.clientScope, 'subnet');
   assert.equal(configured.clientSubnet, '10.77.0.0/24');
+});
+
+test('preset selects all discovered tunnel and proxy sources in one schema 2 configuration', async () => {
+  const values = parseArgs(['--preset', 'amnezia-tailscale', '--all-clients', '--exit-node', 'exit.example.ts.net', '--domains', '.service.example']);
+  const configured = await applyPreset(values, async () => [{
+    source_type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg', interface: 'awg0',
+    client_subnet: '10.77.0.0/24', client_addresses: ['10.77.0.2/32']
+  }, {
+    source_type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' }
+  }]);
+  const config = buildConfig(configured);
+  assert.equal(config.schema_version, '2.0');
+  assert.deepEqual(config.sources.map((source) => source.type), ['tunnel_interface', 'container_egress']);
+  assert.deepEqual(config.policies[0].sources, ['tunnel-1', 'proxy-2']);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('preset rejects partial explicit selection and a discovered tunnel without a canary', async () => {
+  await assert.rejects(
+    applyPreset(parseArgs(['--preset', 'amnezia-tailscale', '--source-container', 'amnezia-awg']), async () => []),
+    /requires both --source-container and --source-interface/
+  );
+  await assert.rejects(
+    applyPreset(parseArgs(['--preset', 'amnezia-tailscale', '--exit-node', 'exit.example.ts.net']), async () => [{
+      source_type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg', interface: 'awg0',
+      client_subnet: '10.77.0.0/24', client_addresses: []
+    }]),
+    /no configured VPN client \/32/
+  );
 });
 
 test('setup shortcut creates an Amnezia and Tailscale config through the guarded preset', async () => {

@@ -1,103 +1,92 @@
 # Architecture
 
-## Policy pipeline
+## Data path
 
 ```text
-source adapter -> managed DNS/IP selection -> source-scoped capture -> strict egress
-                                      \---- non-selected traffic ----> direct egress
+tunnel interfaces (host or container) --- PREROUTING --\
+                                                       +-> managed DNS/IP sets
+proxy containers -------------------------- OUTPUT ---/          |
+                                                                 +-> sing-box -> strict egress
+unselected traffic --------------------------------------------------------> existing direct path
 ```
 
-The core has no country-specific behavior. A regional profile is ordinary user
-data: domain suffixes and optional IPv4 CIDRs. Source and egress implementations
-remain adapters.
+The core has no country-specific behavior. A routing profile is ordinary user
+data containing domain suffixes and optional IPv4 CIDRs.
 
-## AmneziaWG2 topology
+## Source adapters
 
-AmneziaWG2 keeps `awg0`, client addresses, and pre-NAT traffic inside its Docker
-network namespace. The capture and DNS sidecars therefore join that namespace.
-The existing Amnezia container is connected to one project-owned internal
-network with a negative gateway priority; this adds SOCKS reachability without
-changing its default route.
+`tunnel_interface` captures packets before the existing VPN source performs
+NAT. Rules match the declared interface and an explicit `/32` list or VPN
+subnet. The interface may live on the host or inside a container.
 
-```text
-Amnezia namespace
-  explicit client list or VPN subnet -> awg0
-    |-- DNS :53 -> dnsmasq :5353 -> persistent nftables DNS set
-    |-- selected TCP -> nftables REDIRECT -> sing-box
-    |-- selected UDP / UDP 443 -> reject
-    `-- everything else -> existing Amnezia NAT/direct path
+`container_egress` captures outbound sockets in one proxy container namespace.
+This is the adapter for XRay/V2Ray-style protocols that terminate connections
+inside a container. It necessarily applies to every user of that container;
+per-user identity is no longer present on outbound packets.
 
-sing-box -> project internal proxy network -> Tailscale userspace container
-                                             -> separate control network
-                                             -> selected exit node
-```
+VPN Router borrows source namespaces. It never owns, edits, stops, removes, or
+restarts source VPN containers.
 
-Tailscale never joins the Amnezia namespace and cannot replace its default
-route. Its SOCKS listener is not published on the host.
+## Namespace services
 
-sing-box resolves the project-owned SOCKS service through the container's local
-resolver with its own DNS cache disabled. A temporary `NXDOMAIN` while the
-Tailscale container is stopped is therefore not retained after that container
-returns; recovery does not require restarting the capture sidecar.
+Each distinct source namespace receives:
 
-## Selection and fail-closed behavior
+- one project-owned nftables table;
+- one managed DNS sidecar when suffix selection is used;
+- one sing-box capture sidecar.
 
-dnsmasq adds only IPv4 answers for configured suffixes to a persistent
-nftables set. DNS replies and the dnsmasq cache are capped at 300 seconds, but
-client resolvers can retain an answer after the server cache has expired. A
-selected address therefore remains strict until lifecycle rollback or a fresh
-apply removes the owned table. This intentionally prefers temporary
-over-routing of a stale or shared address to a direct leak. Static CIDRs use a
-separate persistent set.
+All namespaces share one strict egress. For managed Tailscale, the egress is a
+userspace-networking container with persistent state. Container sources are
+connected to a project-owned internal proxy network using negative gateway
+priority, so their default routes do not change. A host source reaches the same
+SOCKS listener through a loopback-only published port.
 
-After a fresh apply, the operator must flush the canary client's DNS cache or
-explicitly re-resolve the domains used for acceptance through managed DNS.
-Previously cached answers cannot be reconstructed from suffixes alone.
+## Selection and loop prevention
 
-Every generated DNS redirect, TCP redirect, forward guard, UDP, and QUIC rule
-matches both the source interface and a project-owned nftables client set. The
-set contains either the explicit `/32` rollout list or the configured VPN
-subnet. A wildcard interface-only scope is forbidden.
+dnsmasq redirects plain DNS and inserts selected IPv4 answers into a
+pre-created nftables set before returning the answer. Static CIDRs use a
+separate set. The entries remain until disable or a fresh apply, preferring
+temporary over-routing to a later direct leak from a longer-lived client cache.
 
-For every selected TCP set, the generator emits two complementary rules:
+Tunnel sources use nftables `PREROUTING`. Proxy sources use `OUTPUT` and exclude:
 
-1. A NAT-prerouting TCP redirect to the sing-box redirect listener.
-2. A forward-hook reject for the same interface, source, and destination.
+- dnsmasq by its dedicated UID;
+- sing-box connections by an explicit routing mark;
+- loopback destinations after DNS redirection.
 
-Redirected traffic is locally delivered and never reaches the forward hook. If
-the listener disappears, the redirected connection is closed locally. If the
-redirect does not claim a selected packet, the forward guard blocks it before
-the ordinary NAT path. If SOCKS disappears while sing-box is running, sing-box
-has only the strict outbound and no direct fallback. Non-selected traffic never
-enters sing-box.
+sing-box routes everything accepted by its strict inbound directly to the
+selected egress. It does not repeat SNI classification.
 
-The router does not sniff TLS or HTTP names after DNS/IP selection. Repeating
-classification inside the capture process would turn unknown captured traffic
-into an accidental block or fallback decision.
+## Fail-closed behavior
+
+Selected TCP is redirected locally. A tunnel `FORWARD` guard rejects a packet
+that was selected but not claimed by redirect. A proxy `OUTPUT` guard rejects
+selected TCP that was not claimed. Selected UDP, including QUIC, is rejected.
+If sing-box or SOCKS is unavailable, the selected connection fails locally;
+unselected traffic never enters the capture process.
+
+## Lifecycle and ownership
+
+`enable` validates every namespace, captures a root-only network baseline,
+stores exact source container IDs, arms a systemd rollback deadman, and applies
+all sources transactionally. Failure in one source rolls back the whole apply.
+
+`disable` is the master switch. It removes only the manifest-owned nftables
+tables, capture/DNS/egress containers, project networks, and attachments. It
+preserves source VPNs and Tailscale state. `reconcile` detects source-container
+recreation and restores owned resources only after safe cleanup.
 
 ## Protocol boundary
 
-Version `0.4.0-pre-alpha` supports IPv4/TCP only. Selected UDP is rejected and
-UDP/443 is rejected for the canary so clients can retry over TCP. A global IPv6
-address on the source interface makes managed preflight fail. IPv6 requires a
-future source identity and routing design that can preserve the `/32` isolation
-guarantee; an interface-wide IPv6 reject would affect unrelated clients.
-
-## Ownership and recovery
-
-One deployment owns exactly the names derived from `resources.service_name`
-plus its declared nftables table. Before any apply, the lifecycle captures
-root-only Docker, address, route, rule, and nftables evidence. It refuses a
-name or table collision without an existing project manifest.
-
-`enable` is transactional and arms a systemd rollback deadman. `disable` is the
-normal routing switch; `rollback`
-removes only manifest-owned sidecars, networks, and table. It does not modify
-the AmneziaWG2 container, its routes, or the persisted Tailscale state.
+Version `0.5.0-pre-alpha` is IPv4/TCP-only. Proxy namespaces reject IPv6;
+tunnel preflight refuses a global IPv6 address because a safe client-scoped
+IPv6 model is not implemented. DoH/DoT, ECH, direct-IP connections, private
+resolvers, and shared CDN addresses remain explicit limitations.
 
 ## Upstream references
 
 - [Tailscale userspace networking](https://tailscale.com/docs/concepts/userspace-networking)
 - [Tailscale coexistence with other VPNs](https://tailscale.com/docs/reference/faq/other-vpns)
+- [sing-box dial fields and routing mark](https://sing-box.sagernet.org/configuration/shared/dial/)
 - [sing-box redirect inbound](https://sing-box.sagernet.org/configuration/inbound/redirect/)
-- [dnsmasq nftset and cache options](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html)
+- [dnsmasq nftset options](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html)

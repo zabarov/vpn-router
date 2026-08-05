@@ -152,6 +152,9 @@ test('rollback compares stable network semantics instead of volatile lease and k
   assert.match(normalizer, /"link_netnsid"/);
   assert.match(normalizer, /"preferred_life_time"/);
   assert.match(normalizer, /"valid_life_time"/);
+  assert.match(normalizer, /isEphemeralContainerLink/);
+  assert.match(normalizer, /name[.]startsWith\("veth"\)/);
+  assert.match(normalizer, /filter\(\(entry\) => !isEphemeralContainerLink\(entry\)\)/);
   assert.match(normalizer, /Object[.]keys\(value\)[.]sort\(\)/);
 
   const verifyStart = source.indexOf('verify_baseline_restored()');

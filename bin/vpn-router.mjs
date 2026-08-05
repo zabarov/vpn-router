@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import process from 'node:process';
-import { parseDocument } from 'yaml';
+import { parseDocument, stringify } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
 import { generateSingBoxConfig } from '../src/sing-box-generator.mjs';
 import { generateNftablesConfig } from '../src/nftables-generator.mjs';
 import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
-import { sourceClientScope } from '../src/config-normalizer.mjs';
+import { migrateConfig, normalizeConfig, sourceClientScope } from '../src/config-normalizer.mjs';
+import { buildRuntimePlan } from '../src/runtime-plan.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-sing-box|render-nftables|render-dnsmasq|render-runtime-env> --config <path>';
+  return 'Usage: vpn-router <validate|render-dnsmasq|render-runtime-env|render-runtime-plan> --config <path>\n       vpn-router <render-nftables|render-sing-box> --config <path> [--source <tag>]\n       vpn-router migrate-config --input <path> --output <path>';
 }
 
 function shellQuote(value) {
@@ -20,8 +21,24 @@ function shellQuote(value) {
 }
 
 async function main(argv) {
-  const [command, option, configPath, ...extraArgs] = argv;
-  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq', 'render-runtime-env'].includes(command) || option !== '--config' || !configPath || extraArgs.length > 0) {
+  if (argv[0] === 'migrate-config') {
+    const [, inputOption, inputPath, outputOption, outputPath, ...extraArgs] = argv;
+    if (inputOption !== '--input' || !inputPath || outputOption !== '--output' || !outputPath || extraArgs.length > 0 || inputPath === outputPath) throw new Error(usage());
+    const source = await readFile(inputPath, 'utf8');
+    const document = parseDocument(source, { uniqueKeys: true });
+    if (document.errors.length > 0) throw new Error(`YAML parse error: ${document.errors[0].message}`);
+    const config = document.toJS();
+    const result = validateConfig(config);
+    if (!result.valid) throw new Error(`Configuration is invalid:\n- ${result.errors.join('\n- ')}`);
+    const migrated = migrateConfig(config);
+    await writeFile(outputPath, stringify(migrated, { lineWidth: 0 }), { mode: 0o600, flag: 'wx' });
+    process.stdout.write(`Migrated configuration written to: ${outputPath}\n`);
+    return;
+  }
+  const [command, option, configPath, sourceOption, sourceTag, ...extraArgs] = argv;
+  const hasSourceSelector = sourceOption === '--source' && Boolean(sourceTag) && extraArgs.length === 0;
+  const hasNoExtraArgs = sourceOption === undefined && sourceTag === undefined && extraArgs.length === 0;
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-dnsmasq', 'render-runtime-env', 'render-runtime-plan'].includes(command) || option !== '--config' || !configPath || (!hasNoExtraArgs && !(['render-nftables', 'render-sing-box'].includes(command) && hasSourceSelector))) {
     throw new Error(usage());
   }
 
@@ -31,7 +48,8 @@ async function main(argv) {
     throw new Error(`YAML parse error: ${document.errors[0].message}`);
   }
 
-  const result = validateConfig(document.toJS());
+  const rawConfig = document.toJS();
+  const result = validateConfig(rawConfig);
   if (!result.valid) {
     throw new Error(`Configuration is invalid:\n- ${result.errors.join('\n- ')}`);
   }
@@ -40,23 +58,32 @@ async function main(argv) {
     return;
   }
   if (command === 'render-nftables') {
-    process.stdout.write(generateNftablesConfig(document.toJS()));
+    process.stdout.write(generateNftablesConfig(normalizeConfig(rawConfig), { sourceTag: hasSourceSelector ? sourceTag : undefined }));
     return;
   }
   if (command === 'render-dnsmasq') {
-    process.stdout.write(generateDnsmasqConfig(document.toJS()));
+    process.stdout.write(generateDnsmasqConfig(normalizeConfig(rawConfig)));
+    return;
+  }
+  if (command === 'render-runtime-plan') {
+    process.stdout.write(`${JSON.stringify(buildRuntimePlan(rawConfig), null, 2)}\n`);
     return;
   }
   if (command === 'render-runtime-env') {
-    const config = document.toJS();
+    const config = normalizeConfig(rawConfig);
     const source = config.sources[0];
+    const runtimeSource = rawConfig.schema_version === '1.0' ? rawConfig.sources[0] : source;
     const strictPolicy = config.policies.find((policy) => policy.failure_mode === 'block');
     const strictEgress = config.egresses.find((egress) => egress.tag === strictPolicy.egress);
-    const clientScope = sourceClientScope(source);
+    const clientScope = sourceClientScope(runtimeSource);
     const fields = {
-      SOURCE_TYPE: source.type,
-      SOURCE_CONTAINER: source.container_name ?? 'none',
-      SOURCE_INTERFACE: source.interface,
+      CONFIG_SCHEMA_VERSION: rawConfig.schema_version,
+      SOURCE_TYPE: runtimeSource.type,
+      SOURCE_COUNT: config.sources.length,
+      SOURCE_TAGS: config.sources.map((candidate) => candidate.tag).join(','),
+      SOURCES_JSON: JSON.stringify(config.sources),
+      SOURCE_CONTAINER: runtimeSource.container_name ?? 'none',
+      SOURCE_INTERFACE: runtimeSource.interface ?? 'none',
       CLIENT_SCOPE_MODE: clientScope.mode,
       CLIENT_SCOPE_CIDRS: clientScope.cidrs.join(','),
       MANAGED_DNS_REQUIRED: strictPolicy.destination_sets.some((name) =>
@@ -79,7 +106,7 @@ async function main(argv) {
     for (const [key, value] of Object.entries(fields)) process.stdout.write(`${key}=${shellQuote(value)}\n`);
     return;
   }
-  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(document.toJS()), null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(generateSingBoxConfig(normalizeConfig(rawConfig), { sourceTag: hasSourceSelector ? sourceTag : undefined }), null, 2)}\n`);
 }
 
 main(process.argv.slice(2)).catch((error) => {

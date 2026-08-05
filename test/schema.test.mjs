@@ -22,14 +22,14 @@ test('the public example satisfies the published JSON Schema', async () => {
 test('the published JSON Schema accepts an explicit VPN client subnet', async () => {
   const { schema, example } = await loadSchemaAndExample();
   const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
-  example.sources[0].client_scope = { mode: 'subnet', subnet: '10.20.0.0/24' };
+  example.sources[0].clients = { mode: 'subnet', subnet: '10.20.0.0/24' };
   assert.equal(validate(example), true, JSON.stringify(validate.errors));
 });
 
 test('the published JSON Schema rejects an implicit all-addresses scope', async () => {
   const { schema, example } = await loadSchemaAndExample();
   const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
-  example.sources[0].client_scope = { mode: 'subnet', subnet: '0.0.0.0/0', unexpected: true };
+  example.sources[0].clients = { mode: 'subnet', subnet: '0.0.0.0/0', unexpected: true };
   assert.equal(validate(example), false);
 });
 

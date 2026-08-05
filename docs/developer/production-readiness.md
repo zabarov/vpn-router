@@ -1,23 +1,24 @@
 # Production readiness
 
-The project is currently pre-alpha. The working reference deployment proves the
-IPv4/TCP data path for the complete configured VPN client pool, but production
-status still requires the following gates.
+The project is currently pre-alpha. The earlier tunnel-only reference
+deployment and the disposable tunnel/proxy laboratories prove important pieces,
+but the schema-2 multi-source lifecycle still requires clean-host and live
+acceptance before production status.
 
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
-| Configuration | Client list/subnet selectors, migration, negative validation | Passed in unit, container and live staged rollout |
+| Configuration | Multi-source schema, migration, negative validation | Passed in unit and schema tests |
 | Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 passes both container-source and real host-interface paths; Linux-interface strict egress remains fixture-only |
-| Routing switch | Idempotent enable/disable with preserved VPN and egress state | Passed between live list and subnet stages |
+| Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Implemented; integrated Linux proof pending |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
-| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tailscale and capture outages passed in container and live stages; broader matrix remains |
-| Restart lifecycle | Host reboot, Docker restart and source recreation | Boot helper start/stop passes on real Linux; full host reboot and source recreation remain pending |
+| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; shared live matrix pending |
+| Restart lifecycle | Host reboot, Docker restart and source recreation | Source recreation and boot-helper start/stop pass on real Linux; full host/Docker reboot remains pending |
 | Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Atomic changed-tree upgrade and previous-version rollback pass the clean-host packaging lab; active data-plane upgrade evidence pending |
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
-| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Passed for both bundled source contracts; real host-interface data-path evidence remains pending |
-| Live rollout | Canary, list and subnet stages with backup and deadman rollback | Passed on the reference AmneziaWG2 plus Tailscale deployment |
+| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2; clean-reader validation pending |
+| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | XRay schema-2 canary and earlier AWG2-only evidence pass; external AWG2 request under the combined policy remains pending |
 
 ## Release levels
 

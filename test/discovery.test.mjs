@@ -25,7 +25,8 @@ test('discovery returns VPN topology and peer addresses without peer keys', asyn
 
   const candidates = await discoverAmneziaSources({ runner });
   assert.deepEqual(candidates, [{
-    source_type: 'amneziawg2_container',
+    source_type: 'tunnel_interface',
+    namespace: 'container',
     container_name: 'amnezia-awg',
     container_image: 'amneziavpn/amneziawg-go:3.0.3',
     interface: 'awg0',
@@ -56,4 +57,23 @@ test('discovery falls back to wg and ignores containers without a readable VPN i
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].interface, 'wg-in');
   assert.deepEqual(candidates[0].client_addresses, ['100.64.10.2/32']);
+});
+
+test('discovery returns XRay as a whole-container egress source without inspecting its configuration', async () => {
+  const calls = [];
+  const runner = async (command, args) => {
+    calls.push([command, ...args]);
+    if (args.join(' ') === 'ps --format {{json .}}') {
+      return '{"Names":"amnezia-xray","Image":"amneziavpn/amnezia-xray:latest"}\n';
+    }
+    throw new Error('proxy discovery must not exec into the source container');
+  };
+  const candidates = await discoverAmneziaSources({ runner });
+  assert.deepEqual(candidates, [{
+    source_type: 'container_egress',
+    container_name: 'amnezia-xray',
+    container_image: 'amneziavpn/amnezia-xray:latest',
+    clients: { mode: 'all' }
+  }]);
+  assert.equal(calls.length, 1);
 });

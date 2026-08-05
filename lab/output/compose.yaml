@@ -1,0 +1,91 @@
+name: vpn-router-output-lab
+
+services:
+  source:
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    privileged: true
+    command: ["/bin/sh", "-ec", "apk add --no-cache bind-tools busybox-extras nftables; nft -f /generated/router.nft; exec sleep infinity"]
+    volumes:
+      - ${VPN_ROUTER_OUTPUT_NFT:?Render nftables first}:/generated/router.nft:ro
+    networks:
+      lab: { ipv4_address: 172.31.20.10 }
+    healthcheck:
+      test: ["CMD-SHELL", "nft list table inet vpn_router_output >/dev/null"]
+      interval: 1s
+      timeout: 1s
+      retries: 90
+
+  capture:
+    image: ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
+    network_mode: service:source
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: [no-new-privileges:true]
+    command: ["-C", "/etc/sing-box", "run"]
+    volumes:
+      - ${VPN_ROUTER_OUTPUT_SING_BOX:?Render sing-box first}:/etc/sing-box/config.json:ro
+    depends_on:
+      source: { condition: service_healthy }
+      socks-egress: { condition: service_healthy }
+
+  dns:
+    build: { context: ../../deploy/dnsmasq }
+    image: vpn-router-dns:output-lab
+    network_mode: service:source
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    command: ["--keep-in-foreground", "--conf-file=/etc/dnsmasq.conf"]
+    volumes:
+      - ${VPN_ROUTER_OUTPUT_DNSMASQ:?Render dnsmasq first}:/etc/dnsmasq.conf:ro
+      - ./resolv.conf:/etc/resolv.conf:ro
+    depends_on:
+      source: { condition: service_healthy }
+      upstream-dns: { condition: service_healthy }
+
+  upstream-dns:
+    build: { context: ../../deploy/dnsmasq }
+    image: vpn-router-dns:output-lab
+    command: ["--keep-in-foreground", "--conf-file=/etc/dnsmasq.conf"]
+    volumes: ["./upstream-dnsmasq.conf:/etc/dnsmasq.conf:ro"]
+    networks:
+      lab: { ipv4_address: 172.31.20.50 }
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':0035 ' /proc/net/udp"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  socks-egress:
+    image: ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d
+    command: ["-C", "/etc/sing-box", "run"]
+    volumes: ["./socks-egress.json:/etc/sing-box/config.json:ro"]
+    networks:
+      lab: { ipv4_address: 172.31.20.40 }
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':0438 ' /proc/net/tcp || grep -q ':0438 ' /proc/net/tcp6"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  strict-target:
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["/bin/sh", "-ec", "while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\nstrict-target\n' | nc -l -p 18080; done"]
+    networks:
+      lab: { ipv4_address: 172.31.20.20 }
+
+  direct-target:
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["/bin/sh", "-ec", "while true; do printf 'HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\ndirect-target\n' | nc -l -p 18080; done"]
+    networks:
+      lab: { ipv4_address: 172.31.20.30 }
+
+  control:
+    image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+    command: ["sleep", "infinity"]
+    networks:
+      lab: { ipv4_address: 172.31.20.11 }
+
+networks:
+  lab:
+    ipam: { config: [{ subnet: 172.31.20.0/24 }] }

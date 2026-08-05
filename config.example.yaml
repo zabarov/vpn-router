@@ -1,14 +1,20 @@
-schema_version: "1.0"
+schema_version: "2.0"
 
 sources:
   - tag: amnezia-in
-    type: amneziawg2_container
+    type: tunnel_interface
+    namespace: container
     container_name: amnezia-awg2
     interface: awg0
     # Use address_list for a staged rollout or subnet for the whole VPN pool.
-    client_scope:
+    clients:
       mode: subnet
       subnet: 10.8.1.0/24
+  - tag: xray-in
+    type: container_egress
+    container_name: amnezia-xray
+    clients:
+      mode: all
 
 capture:
   type: redirect
@@ -27,13 +33,13 @@ egresses:
 
 policies:
   - tag: selected-services
-    source: amnezia-in
+    sources: [amnezia-in, xray-in]
     destination_sets:
       - selected-services
     egress: strict-egress
     failure_mode: block
   - tag: default-direct
-    source: amnezia-in
+    sources: [amnezia-in, xray-in]
     destination_sets:
       - default
     egress: direct

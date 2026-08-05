@@ -28,6 +28,7 @@ test('generates a redirect and isolated Tailscale SOCKS egress contract', () => 
     tag: 'regional-exit',
     server: 'vpn-router-egress',
     server_port: 1055,
+    routing_mark: 21076,
     domain_resolver: { server: 'container-dns', strategy: 'ipv4_only' }
   });
   assert.doesNotMatch(JSON.stringify(generated), /VPN_ROUTER_TAILSCALE_AUTH_KEY|exit_node/);
@@ -49,6 +50,7 @@ test('renders a provider-neutral SOCKS5 egress', () => {
   socksConfig.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'egress.example.net', port: 1080, healthcheck_url: 'https://example.com/' };
   assert.deepEqual(generateSingBoxConfig(socksConfig).outbounds[0], {
     type: 'socks', tag: 'regional-exit', server: 'egress.example.net', server_port: 1080,
+    routing_mark: 21076,
     domain_resolver: { server: 'container-dns', strategy: 'ipv4_only' }
   });
 });
@@ -57,6 +59,28 @@ test('renders a provider-neutral Linux interface egress', () => {
   const interfaceConfig = structuredClone(config);
   interfaceConfig.egresses[1] = { tag: 'regional-exit', type: 'linux_interface', interface: 'wg-exit', healthcheck_url: 'https://example.com/' };
   assert.deepEqual(generateSingBoxConfig(interfaceConfig).outbounds[0], {
-    type: 'direct', tag: 'regional-exit', bind_interface: 'wg-exit'
+    type: 'direct', tag: 'regional-exit', bind_interface: 'wg-exit', routing_mark: 21076
   });
+});
+
+test('omits the loop-prevention mark when a namespace only captures tunnel prerouting', () => {
+  const generated = generateSingBoxConfig(config, { sourceTag: 'amnezia-in' });
+  assert.equal(generated.outbounds[0].routing_mark, undefined);
+});
+
+test('keeps the loop-prevention mark when the selected namespace captures container output', () => {
+  const proxyConfig = structuredClone(config);
+  proxyConfig.schema_version = '2.0';
+  proxyConfig.sources = [{
+    tag: 'xray',
+    type: 'container_egress',
+    container_name: 'amnezia-xray',
+    clients: { mode: 'all' }
+  }];
+  proxyConfig.policies = proxyConfig.policies.map(({ source, ...policy }) => ({
+    ...policy,
+    sources: ['xray']
+  }));
+  const generated = generateSingBoxConfig(proxyConfig, { sourceTag: 'xray' });
+  assert.equal(generated.outbounds[0].routing_mark, 21076);
 });

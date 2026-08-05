@@ -1,10 +1,11 @@
-schema_version: "1.0"
+schema_version: "2.0"
 
 sources:
   - tag: vpn-in
-    type: linux_interface
+    type: tunnel_interface
+    namespace: host
     interface: tun0
-    client_scope:
+    clients:
       mode: address_list
       addresses:
         - 10.30.0.2/32
@@ -24,12 +25,12 @@ egresses:
 
 policies:
   - tag: selected-services
-    source: vpn-in
+    sources: [vpn-in]
     destination_sets: [selected-services]
     egress: tunnel-exit
     failure_mode: block
   - tag: default-direct
-    source: vpn-in
+    sources: [vpn-in]
     destination_sets: [default]
     egress: direct
     failure_mode: direct

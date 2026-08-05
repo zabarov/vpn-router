@@ -15,6 +15,8 @@ const config = {
 
 test('generates dnsmasq nftset rules for strict domain suffixes', () => {
   const generated = generateDnsmasqConfig(config);
+  assert.match(generated, /^user=nobody$/m);
+  assert.match(generated, /^# nftables-output-exclusion-uid=65534$/m);
   assert.match(generated, /^port=5353$/m);
   assert.match(generated, /^max-ttl=300$/m);
   assert.match(generated, /^max-cache-ttl=300$/m);

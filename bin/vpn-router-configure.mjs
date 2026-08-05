@@ -6,7 +6,7 @@ import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { stringify } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
-import { discoverAmneziaSources } from '../src/discovery.mjs';
+import { discoverVpnSources } from '../src/discovery.mjs';
 
 const defaults = {
   output: './router.yaml',
@@ -29,6 +29,7 @@ const defaults = {
   allClients: false,
   force: false,
   nonInteractive: false,
+  discoveredSources: null,
   provided: new Set()
 };
 
@@ -62,7 +63,7 @@ Options:
   --preset <amnezia-tailscale>
   --all-clients (use the discovered VPN subnet; preset only)
   --output <path>
-  --source-type <amneziawg2_container|linux_interface>
+  --source-type <amneziawg2_container|linux_interface|container_egress>
   --source-container <name>
   --source-interface <name>
   --client-scope <address_list|subnet>
@@ -112,37 +113,45 @@ export function parseArgs(argv) {
   return values;
 }
 
-export async function applyPreset(values, discover = discoverAmneziaSources) {
+export async function applyPreset(values, discover = discoverVpnSources) {
   if (!values.preset) return values;
   requireChoice(values.preset, ['amnezia-tailscale'], 'preset');
-  values.sourceType = 'amneziawg2_container';
   values.egressType = 'tailscale_socks';
 
   const sourceIsExplicit = values.provided.has('sourceContainer') && values.provided.has('sourceInterface');
+  if (values.provided.has('sourceContainer') !== values.provided.has('sourceInterface')) {
+    throw new Error('Explicit tunnel selection requires both --source-container and --source-interface. Omit both to select all discovered sources.');
+  }
   if (!sourceIsExplicit) {
     const candidates = await discover();
-    const matching = candidates.filter((candidate) =>
-      (!values.provided.has('sourceContainer') || candidate.container_name === values.sourceContainer)
-      && (!values.provided.has('sourceInterface') || candidate.interface === values.sourceInterface));
-    if (matching.length !== 1) {
-      throw new Error(matching.length === 0
-        ? 'The amnezia-tailscale preset could not find a unique VPN source. Run "vpn-router discover" and pass --source-container and --source-interface.'
-        : 'The amnezia-tailscale preset found multiple VPN sources. Run "vpn-router discover" and select one with --source-container and --source-interface.');
+    if (candidates.length === 0) throw new Error('The amnezia-tailscale preset did not find a supported VPN source. Run "vpn-router discover".');
+    values.discoveredSources = candidates;
+    const candidate = candidates.find((item) => item.source_type === 'tunnel_interface' || (!item.source_type && item.interface));
+    if (!candidate && !candidates.some((item) => item.source_type === 'container_egress')) {
+      throw new Error('The amnezia-tailscale preset did not find a supported tunnel or proxy source.');
     }
-    const candidate = matching[0];
-    values.sourceContainer = candidate.container_name;
-    values.sourceInterface = candidate.interface;
-    if (!values.provided.has('clientSubnet')) values.clientSubnet = candidate.client_subnet;
-    if (values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
-      if (candidate.client_addresses.length === 0) {
-        throw new Error('No configured VPN client /32 was discovered. Add one test client or pass --client-addresses explicitly.');
+    if (candidate) {
+      values.sourceContainer = candidate.container_name;
+      values.sourceInterface = candidate.interface;
+      if (!values.provided.has('clientSubnet')) values.clientSubnet = candidate.client_subnet;
+      if (values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
+        const missing = candidates.filter((item) => (item.source_type === 'tunnel_interface' || (!item.source_type && item.interface)) && (item.client_addresses ?? []).length === 0);
+        if (missing.length > 0) {
+          throw new Error('At least one discovered tunnel has no configured VPN client /32. Add a test client to every tunnel or configure sources explicitly.');
+        }
+        values.clientAddresses = candidate.client_addresses[0];
+        values.provided.add('clientAddresses');
       }
-      values.clientAddresses = candidate.client_addresses[0];
-      values.provided.add('clientAddresses');
+      if (values.clientScope === 'subnet' && candidates.some((item) => (item.source_type === 'tunnel_interface' || (!item.source_type && item.interface)) && !item.client_subnet)) {
+        throw new Error('At least one discovered tunnel has no canonical client subnet. Configure that source explicitly.');
+      }
     }
+  } else {
+    values.sourceType = 'amneziawg2_container';
   }
 
-  if (values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
+  const hasTunnel = !values.discoveredSources || values.discoveredSources.some((item) => item.source_type === 'tunnel_interface' || (!item.source_type && item.interface));
+  if (hasTunnel && values.clientScope === 'address_list' && !values.provided.has('clientAddresses')) {
     throw new Error('The preset requires a real canary /32. Pass --client-addresses or omit source options so discovery can select a configured client.');
   }
   if (values.nonInteractive && !values.provided.has('exitNode')) {
@@ -205,13 +214,17 @@ async function collectInteractive(values) {
 async function collectPresetInteractive(values) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    process.stdout.write('Amnezia VPN source detected.\n');
-    process.stdout.write(`  container: ${values.sourceContainer}\n`);
-    process.stdout.write(`  interface: ${values.sourceInterface}\n`);
-    if (values.clientScope === 'subnet') {
-      process.stdout.write(`  clients: ${values.clientSubnet} (all VPN clients)\n\n`);
-    } else {
-      process.stdout.write(`  test client: ${values.clientAddresses}\n\n`);
+    const count = values.discoveredSources?.length ?? 1;
+    process.stdout.write(`${count} supported VPN source${count === 1 ? '' : 's'} selected.\n`);
+    for (const source of values.discoveredSources ?? [{ container_name: values.sourceContainer, interface: values.sourceInterface }]) {
+      process.stdout.write(`  ${source.container_name}${source.interface ? ` (${source.interface})` : ' (proxy egress)'}\n`);
+    }
+    if (!values.discoveredSources || values.discoveredSources.some((source) => source.source_type !== 'container_egress')) {
+      if (values.clientScope === 'subnet') {
+        process.stdout.write(`  tunnel clients: all discovered VPN subnets\n\n`);
+      } else {
+        process.stdout.write('  tunnel clients: one discovered canary per tunnel\n\n');
+      }
     }
     values.exitNode = await askRequired(rl, 'Tailscale exit node name or IP', values.exitNode);
     values.domains = await askRequired(rl, 'Domain suffixes routed through Tailscale', values.domains);
@@ -230,18 +243,38 @@ function requireChoice(value, allowed, label) {
 }
 
 export function buildConfig(values) {
-  requireChoice(values.sourceType, ['amneziawg2_container', 'linux_interface'], 'source type');
+  requireChoice(values.sourceType, ['amneziawg2_container', 'linux_interface', 'container_egress'], 'source type');
   requireChoice(values.clientScope, ['address_list', 'subnet'], 'client scope');
   requireChoice(values.egressType, ['tailscale_socks', 'socks5', 'linux_interface'], 'egress type');
-  const source = {
-    tag: 'vpn-source',
-    type: values.sourceType,
+  const tunnelClients = () => values.clientScope === 'subnet'
+    ? { mode: 'subnet', subnet: values.clientSubnet }
+    : { mode: 'address_list', addresses: commaList(values.clientAddresses) };
+  const usesDiscovery = Array.isArray(values.discoveredSources);
+  const candidates = values.discoveredSources ?? [{
+    source_type: values.sourceType === 'container_egress' ? 'container_egress' : 'tunnel_interface',
+    namespace: values.sourceType === 'linux_interface' ? 'host' : 'container',
+    container_name: values.sourceType === 'linux_interface' ? undefined : values.sourceContainer,
     interface: values.sourceInterface,
-    client_scope: values.clientScope === 'subnet'
-      ? { mode: 'subnet', subnet: values.clientSubnet }
-      : { mode: 'address_list', addresses: commaList(values.clientAddresses) }
-  };
-  if (values.sourceType === 'amneziawg2_container') source.container_name = values.sourceContainer;
+    client_subnet: values.clientSubnet,
+    client_addresses: commaList(values.clientAddresses)
+  }];
+  const sources = candidates.map((candidate, index) => {
+    const source = candidate.source_type === 'container_egress'
+      ? { tag: `proxy-${index + 1}`, type: 'container_egress', container_name: candidate.container_name, clients: { mode: 'all' } }
+      : {
+          tag: `tunnel-${index + 1}`,
+          type: 'tunnel_interface',
+          namespace: candidate.namespace ?? 'container',
+          interface: candidate.interface,
+          clients: values.clientScope === 'subnet'
+            ? { mode: 'subnet', subnet: candidate.client_subnet ?? values.clientSubnet }
+            : { mode: 'address_list', addresses: candidate.client_addresses?.length
+              ? (usesDiscovery ? [candidate.client_addresses[0]] : candidate.client_addresses)
+              : tunnelClients().addresses }
+        };
+    if (source.type === 'tunnel_interface' && source.namespace === 'container') source.container_name = candidate.container_name;
+    return source;
+  });
 
   let strictEgress;
   if (values.egressType === 'tailscale_socks') {
@@ -272,13 +305,13 @@ export function buildConfig(values) {
   }
 
   return {
-    schema_version: '1.0',
-    sources: [source],
+    schema_version: '2.0',
+    sources,
     capture: { type: 'redirect', listen_port: 15001 },
     egresses: [strictEgress, { tag: 'direct', type: 'direct' }],
     policies: [
-      { tag: 'strict-domains', source: 'vpn-source', destination_sets: ['strict-domains'], egress: 'strict-egress', failure_mode: 'block' },
-      { tag: 'default-direct', source: 'vpn-source', destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
+      { tag: 'strict-domains', sources: sources.map((source) => source.tag), destination_sets: ['strict-domains'], egress: 'strict-egress', failure_mode: 'block' },
+      { tag: 'default-direct', sources: sources.map((source) => source.tag), destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
     ],
     destination_sets: {
       'strict-domains': { domain_suffixes: commaList(values.domains) }

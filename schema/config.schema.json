@@ -6,8 +6,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "sources", "capture", "egresses", "policies", "destination_sets", "traffic_handling", "resources"],
   "properties": {
-    "schema_version": { "const": "1.0" },
-    "sources": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/source" } },
+    "schema_version": { "const": "2.0" },
+    "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/source" } },
     "capture": {
       "type": "object",
       "additionalProperties": false,
@@ -59,44 +59,7 @@
   },
   "$defs": {
     "tag": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}$" },
-    "source": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["tag", "type", "container_name", "interface"],
-          "oneOf": [
-            { "required": ["client_scope"], "properties": { "client_scope": true } },
-            { "required": ["client_subnet"], "properties": { "client_subnet": true } }
-          ],
-          "properties": {
-            "tag": { "$ref": "#/$defs/tag" },
-            "type": { "const": "amneziawg2_container" },
-            "container_name": { "type": "string", "minLength": 1 },
-            "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
-            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" },
-            "client_scope": { "$ref": "#/$defs/clientScope" }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["tag", "type", "interface"],
-          "oneOf": [
-            { "required": ["client_scope"], "properties": { "client_scope": true } },
-            { "required": ["client_subnet"], "properties": { "client_subnet": true } }
-          ],
-          "properties": {
-            "tag": { "$ref": "#/$defs/tag" },
-            "type": { "const": "linux_interface" },
-            "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
-            "client_subnet": { "type": "string", "pattern": "^[0-9.]+/32$" },
-            "client_scope": { "$ref": "#/$defs/clientScope" }
-          }
-        }
-      ]
-    },
-    "clientScope": {
+    "tunnelClients": {
       "oneOf": [
         {
           "type": "object",
@@ -113,7 +76,52 @@
           "required": ["mode", "subnet"],
           "properties": {
             "mode": { "const": "subnet" },
-            "subnet": { "type": "string", "pattern": "^[0-9.]+/(?:[0-9]|[12][0-9]|3[0-2])$" }
+            "subnet": { "type": "string", "pattern": "^(?!0\\.0\\.0\\.0/0$)[0-9.]+/(?:[0-9]|[12][0-9]|3[0-2])$" }
+          }
+        }
+      ]
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tag", "type", "namespace", "interface", "clients"],
+          "properties": {
+            "tag": { "$ref": "#/$defs/tag" },
+            "type": { "const": "tunnel_interface" },
+            "namespace": { "const": "host" },
+            "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
+            "clients": { "$ref": "#/$defs/tunnelClients" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tag", "type", "namespace", "container_name", "interface", "clients"],
+          "properties": {
+            "tag": { "$ref": "#/$defs/tag" },
+            "type": { "const": "tunnel_interface" },
+            "namespace": { "const": "container" },
+            "container_name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$" },
+            "interface": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}$" },
+            "clients": { "$ref": "#/$defs/tunnelClients" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tag", "type", "container_name", "clients"],
+          "properties": {
+            "tag": { "$ref": "#/$defs/tag" },
+            "type": { "const": "container_egress" },
+            "container_name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$" },
+            "clients": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": { "mode": { "const": "all" } }
+            }
           }
         }
       ]
@@ -124,10 +132,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["tag", "type"],
-          "properties": {
-            "tag": { "$ref": "#/$defs/tag" },
-            "type": { "const": "direct" }
-          }
+          "properties": { "tag": { "$ref": "#/$defs/tag" }, "type": { "const": "direct" } }
         },
         {
           "type": "object",
@@ -171,10 +176,10 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tag", "source", "destination_sets", "egress", "failure_mode"],
+      "required": ["tag", "destination_sets", "egress", "failure_mode"],
       "properties": {
         "tag": { "$ref": "#/$defs/tag" },
-        "source": { "$ref": "#/$defs/tag" },
+        "sources": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/tag" } },
         "destination_sets": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/tag" } },
         "egress": { "$ref": "#/$defs/tag" },
         "failure_mode": { "enum": ["block", "direct"] }

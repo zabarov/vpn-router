@@ -1,0 +1,27 @@
+schema_version: "2.0"
+
+sources:
+  - tag: proxy-source
+    type: container_egress
+    container_name: output-source
+    clients: { mode: all }
+
+capture: { type: redirect, listen_port: 12345 }
+
+egresses:
+  - { tag: direct, type: direct }
+  - tag: strict-egress
+    type: socks5
+    server: 172.31.20.40
+    port: 1080
+    healthcheck_url: https://example.com/
+
+policies:
+  - { tag: strict, sources: [proxy-source], destination_sets: [strict-target], egress: strict-egress, failure_mode: block }
+  - { tag: default, sources: [proxy-source], destination_sets: [default], egress: direct, failure_mode: direct }
+
+destination_sets:
+  strict-target: { domain_suffixes: [.test] }
+
+traffic_handling: { udp_quic: reject, ipv6: reject, dns_mode: managed }
+resources: { nftables_table: vpn_router_output, service_name: vpn-router-output-lab }

@@ -192,13 +192,13 @@ test('accepts a provider-neutral Linux interface strict egress', () => {
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 });
 
-test('requires a separately reachable strict egress for a host Linux source', () => {
+test('allows shared Tailscale for a host tunnel but rejects the same Linux egress interface', () => {
   const config = validConfig();
   config.sources[0] = {
     tag: 'vpn-in', type: 'linux_interface', interface: 'tun0', client_subnet: '10.8.1.2/32'
   };
   for (const policy of config.policies) policy.source = 'vpn-in';
-  assert.match(validateConfig(config).errors.join('\n'), /requires an external SOCKS5 or Linux-interface strict egress/);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 
   config.egresses[1] = {
     tag: config.egresses[1].tag,
@@ -206,7 +206,37 @@ test('requires a separately reachable strict egress for a host Linux source', ()
     interface: 'tun0',
     healthcheck_url: 'https://example.com/'
   };
-  assert.match(validateConfig(config).errors.join('\n'), /source and strict egress interfaces must be different/);
+  assert.match(validateConfig(config).errors.join('\n'), /source vpn-in and strict egress interfaces must be different/);
+});
+
+test('accepts simultaneous tunnel and container-egress sources in schema 2', () => {
+  const legacy = validConfig();
+  const config = {
+    ...legacy,
+    schema_version: '2.0',
+    sources: [
+      { tag: 'awg', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.1.0/24' } },
+      { tag: 'xray', type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' } }
+    ],
+    policies: legacy.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['awg', 'xray'] }))
+  };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('schema 2 rejects ambiguous container ownership and invalid per-user proxy scope', () => {
+  const legacy = validConfig();
+  const config = {
+    ...legacy,
+    schema_version: '2.0',
+    sources: [
+      { tag: 'xray-a', type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' } },
+      { tag: 'xray-b', type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'subnet', subnet: '10.8.1.0/24' } }
+    ],
+    policies: legacy.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['xray-a', 'xray-b'] }))
+  };
+  const errors = validateConfig(config).errors.join('\n');
+  assert.match(errors, /container_egress clients must declare only mode all/);
+  assert.match(errors, /source runtime identity is duplicated/);
 });
 
 test('rejects duplicate destination entries', () => {

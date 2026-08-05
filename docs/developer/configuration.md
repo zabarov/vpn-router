@@ -1,175 +1,145 @@
 # Configuration reference
 
-The installed `vpn-router configure` wizard produces this schema interactively
-or with explicit non-interactive flags. It validates before writing, uses mode
-`0600`, refuses overwrite unless `--force` is provided, and never asks for or
-stores a credential value.
+`vpn-router configure` writes validated mode-`0600` YAML and refuses to
+overwrite a file unless `--force` is explicit. The published JSON Schema is
+[`schema/config.schema.json`](../../schema/config.schema.json); the semantic
+validator enforces additional safety relationships.
 
-The YAML contract is published as
-[`schema/config.schema.json`](../../schema/config.schema.json). The custom
-validator adds semantic safety rules that JSON Schema cannot express compactly.
+## Schema version 2
 
-For the common managed topology, `vpn-router discover` reads the running Docker
-source without changing it, and `vpn-router configure --preset
-amnezia-tailscale` fills the detected container, interface, subnet, and one
-real canary `/32`. Ambiguous discovery fails closed and requires explicit
-source flags. The preset never writes an auth key.
+A configuration contains one or more sources, exactly one strict egress plus
+one direct egress, one strict policy, and one default-direct policy. Both
+policies must cover the same source set.
 
-## Pre-alpha shape
+```yaml
+schema_version: "2.0"
+sources:
+  - tag: tunnel-in
+    type: tunnel_interface
+    namespace: container
+    container_name: amnezia-awg2
+    interface: awg0
+    clients:
+      mode: subnet
+      subnet: 10.8.1.0/24
+  - tag: proxy-in
+    type: container_egress
+    container_name: amnezia-xray
+    clients:
+      mode: all
+```
 
-The current pre-alpha contract requires:
-
-- exactly one active source;
-- exactly one direct and one supported strict egress, both referenced;
-- exactly one strict policy with `failure_mode: block`;
-- exactly one default policy with `destination_sets: [default]`, a direct
-  egress, and `failure_mode: direct`;
-- the same source in both policies;
-- `traffic_handling.udp_quic: reject` and `traffic_handling.ipv6: reject`;
-- managed DNS whenever the strict policy contains domain suffixes.
-
-Non-default `failure_mode: direct`, multiple strict regions, IPv6 CIDRs, and
-alternate protocol behavior are rejected instead of being
-partially implemented.
+The complete safe shape is in [`config.example.yaml`](../../config.example.yaml).
 
 ## Sources
 
-### `amneziawg2_container`
+### `tunnel_interface`
 
-Use this when the VPN interface lives inside an Amnezia Docker container:
+Use `namespace: host` for a host WireGuard/OpenVPN/TUN interface. Use
+`namespace: container` plus `container_name` when the interface is inside an
+Amnezia or other VPN container.
 
-```yaml
-sources:
-  - tag: amnezia-in
-    type: amneziawg2_container
-    container_name: amnezia-awg2
-    interface: awg0
-    client_scope:
-      mode: address_list
-      addresses: [10.8.1.2/32]
-```
-
-`client_scope` is an enforcement boundary, not documentation. Use
-`address_list` for a staged rollout and `mode: subnet` with the explicit VPN
-CIDR for all users. `0.0.0.0/0` and interface-only wildcard selection are
-rejected. The legacy `client_subnet` field accepts one `/32` during migration.
-
-### `linux_interface`
-
-Use this for WireGuard, OpenVPN, IPsec, or another VPN whose interface is in the
-namespace where nftables and the capture process run:
+`clients` is an enforcement boundary:
 
 ```yaml
-sources:
-  - tag: generic-vpn
-    type: linux_interface
-    interface: wg0
-    client_scope:
-      mode: subnet
-      subnet: 10.8.1.0/24
+clients:
+  mode: address_list
+  addresses: [10.8.1.2/32]
 ```
 
-The bundled lifecycle runs the capture and DNS sidecars with host networking
-for this adapter and applies its owned nftables table in the host namespace.
-The VPN implementation remains operator-owned and is never restarted. Use an
-external `socks5` egress or a different `linux_interface`; managed Tailscale
-currently requires `amneziawg2_container`.
+Use `address_list` for a canary. After acceptance, use `mode: subnet` with the
+canonical VPN CIDR. Wildcard `0.0.0.0/0` scope is rejected.
 
-## Egresses
+### `container_egress`
 
-A `tailscale_socks` egress declares the isolated userspace service:
+Use this when a proxy such as XRay terminates client sessions and creates new
+outbound sockets:
 
 ```yaml
-egresses:
-  - tag: strict-egress
-    type: tailscale_socks
-    auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
-    exit_node: exit-node.example.ts.net
-    proxy_server: vpn-router-egress
-    proxy_port: 1055
-    healthcheck_url: https://example.com/
+- tag: xray-in
+  type: container_egress
+  container_name: amnezia-xray
+  clients:
+    mode: all
 ```
 
-The YAML contains only the environment-variable name, never the auth-key
-value. For the managed Amnezia lifecycle, `proxy_server` must be
-`<resources.service_name>-egress`. `exit_node` must be a full hostname or IP,
-not an ambiguous short label.
-`healthcheck_url` must be a credential-free HTTPS URL that is expected to be
-reachable through the selected exit. Managed apply does not report success
-until this URL works through the actual SOCKS listener three consecutive times.
-The generated sing-box configuration uses Docker's local resolver without an
-internal DNS cache so the SOCKS service name can recover after a container
-restart instead of retaining a transient negative answer.
+Only `mode: all` is valid. Outbound sockets no longer contain the original VPN
+client address, so per-user selection would be misleading and unsafe.
 
-An external SOCKS5 server is provider-neutral:
+## Egress adapters
+
+Managed Tailscale userspace SOCKS:
 
 ```yaml
-egresses:
-  - tag: remote-exit
-    type: socks5
-    server: egress.example.net
-    port: 1080
-    healthcheck_url: https://example.com/
+- tag: strict-egress
+  type: tailscale_socks
+  auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
+  exit_node: exit-node.example.ts.net
+  proxy_server: vpn-router-egress
+  proxy_port: 1055
+  healthcheck_url: https://example.com/
 ```
 
-The first contract supports a credential-free SOCKS5 endpoint. Protect it with
-network allowlists or a separately managed tunnel; authenticated SOCKS secrets
-are not yet accepted in public YAML.
+The YAML stores only an environment variable name. A one-off key is needed for
+first enrollment and is removed from the recreated egress container after its
+state has been persisted.
 
-A separately managed local tunnel can be selected by interface:
+External credential-free SOCKS5:
 
 ```yaml
-egresses:
-  - tag: tunnel-exit
-    type: linux_interface
-    interface: wg-exit
-    healthcheck_url: https://example.com/
+- tag: strict-egress
+  type: socks5
+  server: proxy.example.net
+  port: 1080
+  healthcheck_url: https://example.com/
 ```
 
-The generators support all three adapters. With an `amneziawg2_container`
-source, the bundled transactional lifecycle manages the Tailscale sidecar and
-treats SOCKS5 services or tunnel interfaces as external dependencies. It
-health-checks external dependencies but never starts, stops, or reconfigures
-them.
+Externally managed Linux interface:
 
-## Destination sets
+```yaml
+- tag: strict-egress
+  type: linux_interface
+  interface: wg-exit
+  healthcheck_url: https://example.com/
+```
 
-Sets may contain IPv4 CIDRs, lower-case ASCII domain suffixes, or both:
+External adapters are health-checked but never started, stopped, or configured
+by VPN Router.
+
+## Policies and destination sets
+
+The strict policy uses `failure_mode: block`; the default policy uses the
+direct egress. `sources` may list all or an explicit subset, but the current
+MVP requires the strict and default policies to cover the same set.
+
+Domain suffixes must be lower-case ASCII with a leading dot. Use punycode for
+internationalized domains. Optional IPv4 CIDRs may be combined with suffixes.
+No country or provider list is built in.
 
 ```yaml
 destination_sets:
   selected-services:
-    domain_suffixes:
-      - .service.example
-      - .corp.example
-    ip_cidrs:
-      - 192.0.2.0/24
+    domain_suffixes: [.service.example, .corp.example]
+    ip_cidrs: [192.0.2.0/24]
 ```
-
-Use punycode for internationalized names. The committed suffixes are reserved
-documentation examples, not a maintained destination list or geographic
-database. An IP learned for one selected hostname can also serve unrelated
-names on a shared CDN, so strict profiles need acceptance testing.
 
 ## Managed DNS limitations
 
-The generated rules redirect plain client DNS on TCP/UDP port 53 to dnsmasq
-port 5353 for the configured client scope. dnsmasq populates the owned IPv4 nftables
-set before returning the answer. DNS TTL and dnsmasq cache lifetime are capped
-at 300 seconds. Dynamic nftables entries remain until `disable`, rollback, or a
-fresh apply. This prevents a longer-lived client DNS cache from creating a
-direct-routing gap after an nftables timeout.
+Plain TCP/UDP port 53 is redirected to dnsmasq. DoH, DoT, browser Secure DNS,
+private resolvers, ECH, direct-IP connections, and addresses cached before
+enable can bypass suffix observation. Shared CDN addresses can cause another
+hostname on the same IP to follow the strict path. These cases require operator
+testing and are not claimed as guaranteed.
 
-DoH, DoT, browser Secure DNS, ECH, direct-IP connections, applications with a
-private resolver, and cached addresses learned before apply bypass suffix
-observation. Guaranteed strict mode therefore requires system DNS and an empty
-client DNS cache at canary start. They are documented limitations, not silent
-fallbacks.
+## Migration
 
-## Owned resources
+Schema version 1 remains readable. Create a separate version-2 file without
+changing the original:
 
-`resources` declares one nftables table and a service-name prefix. Values must
-not collide with an existing deployment. The redirect runtime deliberately
-does not install policy rules, packet marks, or route tables. The lifecycle
-refuses an unowned collision and stores its root-only manifest under
-`/var/lib/<service_name>/runtime/`.
+```sh
+vpn-router migrate-config --input old.yaml --output new.yaml
+```
+
+The migration maps `amneziawg2_container` and `linux_interface` sources to the
+new `tunnel_interface` adapter and changes policy `source` fields to `sources`
+arrays.

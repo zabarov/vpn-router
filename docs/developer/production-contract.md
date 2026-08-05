@@ -8,7 +8,8 @@ the VPN server, or own the VPN interface default route.
 
 The core is provider-neutral:
 
-- a source adapter exposes one Linux interface and an explicit client scope;
+- source adapters expose either a Linux tunnel interface with explicit client
+  scope or all outbound sockets of one proxy container;
 - destination sets select IPv4 addresses directly or through managed DNS;
 - a strict policy sends selected TCP connections to one egress adapter;
 - the default policy leaves all non-selected traffic on the existing VPN path;
@@ -16,12 +17,12 @@ The core is provider-neutral:
 
 AmneziaWG2 and Tailscale are reference adapters, not core requirements.
 
-## Client scope
+## Source and client scope
 
-Every source declares exactly one `client_scope`:
+Every `tunnel_interface` declares exactly one `clients` scope:
 
 ```yaml
-client_scope:
+clients:
   mode: address_list
   addresses:
     - 10.8.1.2/32
@@ -31,7 +32,7 @@ client_scope:
 or:
 
 ```yaml
-client_scope:
+clients:
   mode: subnet
   subnet: 10.8.1.0/24
 ```
@@ -41,9 +42,9 @@ mode for operators who want the same policy for every VPN client. An interface-
 only wildcard is forbidden because it could capture unrelated traffic after a
 network-namespace or interface reuse.
 
-The legacy `client_subnet: <IPv4 /32>` field remains readable during the
-pre-alpha migration period and is normalized to a one-entry `address_list`.
-New configurations must use `client_scope`; both forms together are invalid.
+Every `container_egress` declares `clients: {mode: all}` because XRay-style
+outbound sockets no longer preserve the original VPN client address. Schema
+version 1 remains readable and can be migrated into a separate file.
 
 ## Egress adapters
 
@@ -92,7 +93,8 @@ preflight -> enable -> status/verify -> disable
 - `verify` checks the current manifest, source identity, selected egress,
   ordinary path, strict path, and ownership boundaries.
 
-All lifecycle commands are idempotent. `disable` followed by `enable` is the
+All lifecycle commands are idempotent. One installation applies all configured
+sources transactionally. `disable` followed by `enable` is the
 documented routing switch. It must not disconnect VPN clients or restart the
 VPN implementation.
 
@@ -117,12 +119,13 @@ VPN implementation.
 Production readiness requires more than passing unit tests. A release candidate
 must prove:
 
-1. one-client canary behavior;
+1. one-client tunnel canary plus one exact-domain proxy-container canary;
 2. an `address_list` with at least two clients and one excluded control client;
 3. explicit `subnet` behavior for the complete test pool;
 4. strict and direct identities;
 5. Tailscale/SOCKS/capture/DNS outage behavior;
-6. repeated enable, disable, rollback, restart, and source recreation;
+6. simultaneous tunnel/proxy operation and repeated enable, disable, rollback,
+   restart, and source recreation;
 7. exact ownership cleanup and baseline restoration;
 8. secret-free artifacts, logs, status, repository and release package;
 9. upgrade and downgrade between the previous and candidate configuration;

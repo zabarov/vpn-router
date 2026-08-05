@@ -1,12 +1,18 @@
-schema_version: "1.0"
+schema_version: "2.0"
 
 sources:
   - tag: host-vpn
-    type: linux_interface
+    type: tunnel_interface
+    namespace: host
     interface: vpr-in
-    client_scope:
+    clients:
       mode: address_list
       addresses: [10.55.0.2/32]
+  - tag: proxy-vpn
+    type: container_egress
+    container_name: vpr-proxy-source
+    clients:
+      mode: all
 
 capture:
   type: redirect
@@ -15,20 +21,20 @@ capture:
 egresses:
   - tag: strict-egress
     type: socks5
-    server: 127.0.0.1
-    port: 18080
+    server: 172.29.55.2
+    port: 1080
     healthcheck_url: https://example.com/
   - tag: direct
     type: direct
 
 policies:
   - tag: strict-target
-    source: host-vpn
+    sources: [host-vpn, proxy-vpn]
     destination_sets: [strict-target]
     egress: strict-egress
     failure_mode: block
   - tag: default-direct
-    source: host-vpn
+    sources: [host-vpn, proxy-vpn]
     destination_sets: [default]
     egress: direct
     failure_mode: direct

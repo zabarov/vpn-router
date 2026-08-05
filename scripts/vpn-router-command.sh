@@ -13,6 +13,7 @@ Usage:
   vpn-router discover [--json]
   vpn-router setup [options]
   vpn-router configure [wizard options]
+  vpn-router migrate-config --input <path> --output <path>
   vpn-router validate [--config <path>]
   vpn-router doctor [--config <path>]
   vpn-router preflight|enable|disable|status|verify|rollback|reconcile [options]
@@ -65,6 +66,9 @@ case "$command_name" in
       exec "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate "$@"
     fi
     exec "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$default_config" "$@"
+    ;;
+  migrate-config)
+    exec "$node_bin" "$repo_dir/bin/vpn-router.mjs" migrate-config "$@"
     ;;
   doctor)
     if config_args "$@"; then

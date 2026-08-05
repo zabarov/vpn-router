@@ -24,7 +24,6 @@ test('generates an owned strict-only TCP redirect table with a forward guard', (
   assert.match(generated, /iifname "awg0" ip saddr @source_amnezia_in_clients ip daddr @set_regional_services_dns meta l4proto tcp counter redirect to :12345/);
   assert.match(generated, /chain forward_guard \{[\s\S]*ip daddr @set_regional_services_dns meta l4proto tcp counter reject with tcp reset/);
   assert.match(generated, /iifname "awg0" ip saddr @source_amnezia_in_clients ip daddr @set_regional_services_dns meta l4proto udp counter reject/);
-  assert.match(generated, /iifname "awg0" ip saddr @source_amnezia_in_clients udp dport 443 counter reject/);
   assert.doesNotMatch(generated, /tproxy|meta mark/);
   assert.doesNotMatch(generated, /ip6 daddr/);
   assert.doesNotMatch(generated, /flush ruleset/);
@@ -32,4 +31,27 @@ test('generates an owned strict-only TCP redirect table with a forward guard', (
   for (const line of generated.split('\n').filter((candidate) => /redirect to| reject/.test(candidate))) {
     assert.match(line, /ip saddr @source_amnezia_in_clients/, `rule is missing the client scope: ${line}`);
   }
+});
+
+test('generates fail-closed OUTPUT capture for a proxy container without recapturing router traffic', () => {
+  const multi = {
+    ...structuredClone(config),
+    schema_version: '2.0',
+    sources: [
+      { tag: 'awg', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.1.0/24' } },
+      { tag: 'xray', type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' } }
+    ],
+    policies: config.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['awg', 'xray'] }))
+  };
+  const generated = generateNftablesConfig(multi, { sourceTag: 'xray' });
+  assert.match(generated, /chain capture_output/);
+  assert.match(generated, /meta mark 21076 return/);
+  assert.match(generated, /meta skuid 65534 return/);
+  assert.match(generated, /udp dport 53 counter redirect to :5353/);
+  assert.ok(generated.indexOf('udp dport 53') < generated.indexOf('ip daddr 127.0.0.0/8 return'));
+  assert.match(generated, /ip daddr @set_regional_services_dns meta l4proto tcp counter redirect to :12345/);
+  assert.match(generated, /chain output_guard[\s\S]*meta nfproto ipv6 counter reject/);
+  assert.match(generated, /ip daddr @set_regional_services_dns meta l4proto udp counter reject/);
+  assert.match(generated, /ip daddr @set_regional_services_dns meta l4proto tcp counter reject with tcp reset/);
+  assert.doesNotMatch(generated, /iifname|ip saddr|source_xray_clients/);
 });
