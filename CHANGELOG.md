@@ -22,6 +22,8 @@ All notable changes are documented here.
   unnecessary transaction rollback.
 - Record sanitized combined AWG2/XRay external acceptance, staged all-client
   expansion, idempotent switching, and successful systemd reconciliation.
+- Record a successful installed-release upgrade while the accepted routing
+  runtime and source VPN containers remained active.
 
 ## 0.4.0-pre-alpha - Unreleased
 

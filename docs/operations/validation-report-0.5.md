@@ -41,6 +41,10 @@ pre-alpha canary. It is not production-ready.
   rollback. The lifecycle now requires three consecutive health checks within
   a bounded retry window; the corrected retry passed without weakening the
   fail-closed policy.
+- The installed release was upgraded while the accepted routing runtime stayed
+  active. The current/previous release pointers, systemd unit, runtime status,
+  and both source VPN containers remained healthy; active downgrade execution
+  remains a separate gate.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
@@ -49,6 +53,6 @@ addresses, credentials, profiles, and raw operational logs remain private.
 
 - Repeat the combined live canary after source-container recreation.
 - Prove real host reboot and Docker daemon restart recovery.
-- Validate active-version upgrade/downgrade while routing is enabled.
+- Validate active-version downgrade while routing is enabled.
 - Add signed or reproducible release artifacts and a supported compatibility
   matrix before a stable release claim.

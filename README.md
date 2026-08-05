@@ -18,7 +18,7 @@ Status: `0.5.0-pre-alpha`. IPv4/TCP generators, tunnel and proxy-container
 capture, fail-closed behavior, configuration migration, installation, and the
 operator switch are implemented. This release is not production-ready until
 the new multi-source lifecycle passes the remaining full-host reboot,
-active-upgrade, and post-recreation acceptance gates.
+active-downgrade, and post-recreation acceptance gates.
 
 ## Supported topology
 
