@@ -9,7 +9,7 @@ pre-alpha canary. It is not production-ready.
 
 ## Passed evidence
 
-- 97 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
+- 98 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
   checks pass.
 - The dependency audit reports no known production dependency vulnerability.
 - Disposable tunnel and proxy-container labs prove selected/direct separation,
@@ -30,14 +30,23 @@ pre-alpha canary. It is not production-ready.
 - Two failed live apply attempts rolled back automatically and preserved the
   source VPNs. Their diagnostics led to runtime pinning of the managed SOCKS
   IPv4 address for source containers that do not use Docker service DNS.
+- An external AmneziaWG2 client proved the client-scoped PREROUTING path for
+  the exact-domain canary. The staged expansion then covered the discovered
+  AWG2 subnet and the complete XRay container for `.ru`, `.xn--p1ai`, `.su`,
+  and the retained test domain.
+- The expanded runtime passed direct/strict identity separation, managed-DNS
+  population, AWG2 redirect and XRay OUTPUT capture, source identity and route
+  integrity, deadman cancellation, idempotent enable, and systemd startup.
+- A transient userspace-exit DNS delay triggered the expected automatic
+  rollback. The lifecycle now requires three consecutive health checks within
+  a bounded retry window; the corrected retry passed without weakening the
+  fail-closed policy.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
 
 ## Remaining release gates
 
-- Complete the selected-domain check from a real external AmneziaWG2 client;
-  a server-originated process cannot exercise the client-scoped PREROUTING rule.
 - Repeat the combined live canary after source-container recreation.
 - Prove real host reboot and Docker daemon restart recovery.
 - Validate active-version upgrade/downgrade while routing is enabled.

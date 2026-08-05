@@ -1,6 +1,6 @@
 [Unit]
 Description=VPN Router policy routing
-Documentation=https://github.com/rim/vpn-router
+Documentation=https://github.com/zabarov/vpn-router
 Wants=network-online.target
 After=network-online.target docker.service
 Requires=docker.service

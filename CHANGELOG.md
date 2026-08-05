@@ -20,6 +20,8 @@ All notable changes are documented here.
 - Wait for three consecutive strict-egress health checks during startup so a
   transient userspace-exit DNS delay triggers bounded retry instead of an
   unnecessary transaction rollback.
+- Record sanitized combined AWG2/XRay external acceptance, staged all-client
+  expansion, idempotent switching, and successful systemd reconciliation.
 
 ## 0.4.0-pre-alpha - Unreleased
 

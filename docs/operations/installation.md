@@ -134,4 +134,6 @@ npm run check:clean-host
 ```
 
 Production claims additionally require a real Linux lifecycle, source
-recreation, reboot, rollback, and external-client acceptance evidence.
+recreation, reboot, rollback, and external-client acceptance evidence. The
+sanitized reference deployment now includes combined AWG2/XRay external-client
+acceptance; a real host reboot remains a separate release gate.

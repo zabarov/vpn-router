@@ -18,7 +18,7 @@ acceptance before production status.
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
 | Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2; clean-reader validation pending |
-| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | XRay schema-2 canary and earlier AWG2-only evidence pass; external AWG2 request under the combined policy remains pending |
+| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Combined XRay and external AWG2 exact-domain canaries pass; the staged subnet/container expansion and systemd start pass without source restart or route drift |
 
 ## Release levels
 
