@@ -16,9 +16,9 @@ containers and adds separately owned routing resources.
 
 Status: `0.5.0-pre-alpha`. IPv4/TCP generators, tunnel and proxy-container
 capture, fail-closed behavior, configuration migration, installation, and the
-operator switch are implemented. This release is not production-ready until
-the new multi-source lifecycle passes the remaining full-host reboot,
-active-downgrade, and post-recreation acceptance gates.
+operator switch are implemented. Reference-host reboot, source recreation, and
+active downgrade acceptance now pass. The release remains pre-alpha until the
+compatibility matrix and reproducible release-artifact gates are complete.
 
 ## Supported topology
 

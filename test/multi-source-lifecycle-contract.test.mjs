@@ -55,3 +55,18 @@ test('strict egress readiness tolerates startup DNS delay and requires stable re
   assert.match(lifecycle, /consecutive >= 3/);
   assert.match(lifecycle, /consecutive=0/);
 });
+
+test('lifecycle operations are serialized and status avoids expensive network probes', () => {
+  assert.match(lifecycle, /exec 9>"\/run\/lock\/vpn-router-\$lock_key[.]lock"/);
+  assert.match(lifecycle, /status\|verify\) flock -w 600 9/);
+  assert.match(lifecycle, /\*\) flock -n 9/);
+
+  const statusStart = lifecycle.indexOf('status_runtime()');
+  const status = lifecycle.slice(statusStart, lifecycle.indexOf('case "$command_name"', statusStart));
+  assert.match(status, /status_health=structurally_healthy/);
+  assert.doesNotMatch(status, /healthcheck_group/);
+});
+
+test('preflight reuses the pinned DNS helper image when it already exists', () => {
+  assert.match(lifecycle, /docker image inspect "\$DNS_IMAGE"[^\n]+\|\| docker build/);
+});

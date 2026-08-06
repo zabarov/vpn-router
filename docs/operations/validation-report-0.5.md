@@ -1,6 +1,6 @@
 # 0.5.0-pre-alpha validation report
 
-Date: 2026-08-05
+Date: 2026-08-06
 
 ## Verdict
 
@@ -9,7 +9,7 @@ pre-alpha canary. It is not production-ready.
 
 ## Passed evidence
 
-- 98 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
+- 100 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
   checks pass.
 - The dependency audit reports no known production dependency vulnerability.
 - Disposable tunnel and proxy-container labs prove selected/direct separation,
@@ -43,16 +43,25 @@ pre-alpha canary. It is not production-ready.
   fail-closed policy.
 - The installed release was upgraded while the accepted routing runtime stayed
   active. The current/previous release pointers, systemd unit, runtime status,
-  and both source VPN containers remained healthy; active downgrade execution
-  remains a separate gate.
+  and both source VPN containers remained healthy.
+- A full reference-host reboot restored Docker, both Amnezia sources, systemd
+  reconciliation, the managed egress, and both routing namespaces. AWG2 and
+  XRay were then recreated with new container identities while preserving their
+  listeners, configuration, peers, restart policy, and direct/selected routing.
+- The active installation switched to the retained previous release, passed
+  external AWG2 routing smoke, and switched back to the current release without
+  restarting either source VPN. Final AWG2 and XRay direct/selected smoke passed.
+- The maintenance run exposed excessive work when lifecycle commands overlapped
+  on a 1 GiB host. Lifecycle operations are now serialized, an existing pinned
+  DNS helper image is reused, and `status` performs structural checks without
+  repeating the expensive strict network probes reserved for `verify`.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
 
 ## Remaining release gates
 
-- Repeat the combined live canary after source-container recreation.
-- Prove real host reboot and Docker daemon restart recovery.
-- Validate active-version downgrade while routing is enabled.
 - Add signed or reproducible release artifacts and a supported compatibility
   matrix before a stable release claim.
+- Repeat the release procedure on another independently provisioned provider
+  before promoting the compatibility claim beyond the guarded reference host.

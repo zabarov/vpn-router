@@ -51,6 +51,13 @@ elif [[ -n "$rollback_after" ]]; then
 fi
 
 config_path=$(cd -- "$(dirname -- "$config_path")" && pwd)/$(basename -- "$config_path")
+command -v flock >/dev/null 2>&1 || { echo 'lifecycle=FAIL: flock is required' >&2; exit 1; }
+lock_key=$(printf '%s' "$config_path" | sha256sum | awk '{print substr($1,1,16)}')
+exec 9>"/run/lock/vpn-router-$lock_key.lock"
+case "$command_name" in
+  status|verify) flock -w 600 9 || { echo 'lifecycle=FAIL: timed out waiting for another lifecycle operation' >&2; exit 1; } ;;
+  *) flock -n 9 || { echo 'lifecycle=FAIL: another lifecycle operation is already running' >&2; exit 1; } ;;
+esac
 "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$config_path" >/dev/null
 plan_tmp=$(mktemp /tmp/vpn-router-plan.XXXXXX)
 trap 'rm -f "$plan_tmp"' EXIT
@@ -260,7 +267,7 @@ preflight() {
     [[ -n "$auth_value" || -s "$EGRESS_STATE/tailscaled.state" ]] || { echo "preflight=FAIL: $auth_env is required for first enrollment" >&2; return 1; }
   fi
   mkdir -p "$RUNTIME_DIR" "$ARTIFACT_DIR"; chmod 700 "$STATE_ROOT" "$RUNTIME_DIR" "$ARTIFACT_DIR"
-  docker build -q -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
+  docker image inspect "$DNS_IMAGE" >/dev/null 2>&1 || docker build -q -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
   render_artifacts
   if [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]]; then
     while IFS=$'\t' read -r tag namespace container source_tag capture dns; do healthcheck_group "$namespace" "$container"; done < <(groups_tsv)
@@ -484,7 +491,7 @@ apply_runtime() {
 }
 
 status_runtime() {
-  local status=absent tag namespace container source_tag capture dns capture_state dns_state table_state
+  local status=absent tag namespace container source_tag capture dns capture_state dns_state table_state ok=true
   if [[ -f "$MANIFEST" ]]; then source "$MANIFEST"; status=$MANIFEST_STATUS; fi
   echo "status=$status"
   echo "source_groups=$(groups_tsv | wc -l | tr -d ' ')"
@@ -492,12 +499,23 @@ status_runtime() {
     container_running "$capture" && capture_state=running || capture_state=stopped
     if [[ "$MANAGED_DNS" == true ]]; then container_running "$dns" && dns_state=running || dns_state=stopped; else dns_state=not_applicable; fi
     group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1 && table_state=present || table_state=absent
+    if [[ "$status" == applied ]]; then
+      [[ "$capture_state" == running && "$table_state" == present ]] || ok=false
+      [[ "$MANAGED_DNS" != true || "$dns_state" == running ]] || ok=false
+    fi
     echo "source.$tag.namespace=$namespace"
     echo "source.$tag.capture=$capture_state"
     echo "source.$tag.dns=$dns_state"
     echo "source.$tag.nftables=$table_state"
   done < <(groups_tsv)
-  [[ "$status" != applied ]] || verify_applied
+  if [[ "$status" == applied ]]; then
+    require_manifest_match || ok=false
+    if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
+      container_running "$EGRESS_NAME" && owned_container "$EGRESS_NAME" || ok=false
+    fi
+    [[ "$ok" == true ]] || { echo 'status_health=drifted'; return 1; }
+    echo 'status_health=structurally_healthy'
+  fi
 }
 
 case "$command_name" in

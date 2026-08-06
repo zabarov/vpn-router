@@ -24,6 +24,12 @@ All notable changes are documented here.
   expansion, idempotent switching, and successful systemd reconciliation.
 - Record a successful installed-release upgrade while the accepted routing
   runtime and source VPN containers remained active.
+- Serialize lifecycle operations so concurrent status or verify commands cannot
+  amplify resource usage during an active transaction, reuse the existing DNS
+  helper image, and make `status` a fast structural check while `verify`
+  retains the strict network health probes.
+- Record successful reference-host reboot recovery, AWG2 and XRay source
+  recreation, active downgrade and return, and fresh external routing smoke.
 
 ## 0.4.0-pre-alpha - Unreleased
 

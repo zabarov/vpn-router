@@ -13,8 +13,8 @@ acceptance before production status.
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
 | Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; shared live matrix pending |
-| Restart lifecycle | Host reboot, Docker restart and source recreation | Source recreation and boot-helper start/stop pass on real Linux; full host/Docker reboot remains pending |
-| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Atomic changed-tree upgrade and previous-version rollback pass the clean-host packaging lab; an active reference runtime upgrade also passes, while active downgrade execution remains pending |
+| Restart lifecycle | Host reboot, Docker restart and source recreation | Full reference-host reboot, automatic systemd reconciliation, and live AWG2/XRay recreation pass with external smoke |
+| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Clean-host packaging, active upgrade, active downgrade, return to current, and external post-switch smoke pass |
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
 | Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2; clean-reader validation pending |
