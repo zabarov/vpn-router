@@ -9,7 +9,7 @@ pre-alpha canary. It is not production-ready.
 
 ## Passed evidence
 
-- 102 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
+- 103 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
   checks pass.
 - The dependency audit reports no known production dependency vulnerability.
 - Disposable tunnel and proxy-container labs prove selected/direct separation,
@@ -67,6 +67,18 @@ pre-alpha canary. It is not production-ready.
   SSH route, Docker containers, and Docker networks matched the pre-run
   baseline; project tables, units, configuration, state, and sidecars were
   absent. The borrowed source remained outside installer ownership.
+- A second-provider Ubuntu 24.04 host with an ordinary Amnezia installation
+  completed the managed-Tailscale server lifecycle with simultaneous AWG2 and
+  XRay sources. First enrollment, key removal, strict/direct exit separation,
+  Tailscale and capture outage blocking, recovery, full-host reboot, both
+  source namespace restarts, active downgrade and return, safe uninstall, and
+  state-preserving reinstall passed. Source container identities and the host
+  default route remained unchanged.
+- The first enrollment exposed an ordering defect: a failed readiness check
+  could reach credential scrubbing and recreate an unauthenticated egress.
+  The transaction rolled back before routing was accepted. The lifecycle now
+  requires readiness before scrubbing and again after credential-free
+  recreation; a regression contract and the repeated live enrollment pass.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
@@ -75,7 +87,6 @@ addresses, credentials, profiles, and raw operational logs remain private.
 
 - Add signed or reproducible release artifacts and a supported compatibility
   matrix before a stable release claim.
-- Repeat this exact procedure on the independently provisioned Amnezia host
-  with managed Tailscale egress. The available SSH identities do not currently
-  authorize that host, so this report does not claim a second-provider Amnezia
-  compatibility result.
+- Complete an external-client AWG2 and XRay strict/direct smoke against the
+  second-provider host. The server-side lifecycle result does not by itself
+  prove the public ingress path from a real client.

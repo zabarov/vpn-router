@@ -61,6 +61,21 @@ test('managed Tailscale state survives disable and bootstrap credentials are scr
   assert.doesNotMatch(lifecycle, /rm -rf "\$EGRESS_STATE"/);
 });
 
+test('managed Tailscale enrollment must become ready before credentials are scrubbed', () => {
+  const start = lifecycle.slice(lifecycle.indexOf('start_egress()'), lifecycle.indexOf('pin_tailscale_proxy_ip()'));
+  const firstReadinessGuard = start.indexOf('if ! wait_tailscale_ready; then');
+  const credentialScrub = start.indexOf("auth_value=''");
+  const secondReadinessGuard = start.indexOf('if ! wait_tailscale_ready; then', firstReadinessGuard + 1);
+
+  assert.ok(firstReadinessGuard >= 0);
+  assert.ok(firstReadinessGuard < credentialScrub);
+  assert.match(start.slice(firstReadinessGuard, credentialScrub), /return 1/);
+  assert.ok(secondReadinessGuard > credentialScrub);
+  assert.match(start.slice(secondReadinessGuard), /return 1/);
+  assert.match(start, /before auth-key scrubbing/);
+  assert.match(start, /after auth-key scrubbing/);
+});
+
 test('container namespaces pin the managed SOCKS address instead of depending on source DNS', () => {
   assert.match(lifecycle, /pin_tailscale_proxy_ip/);
   assert.match(lifecycle, /outbound\.server=server/);

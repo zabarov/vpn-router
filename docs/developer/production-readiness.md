@@ -1,9 +1,9 @@
 # Production readiness
 
 The project is currently pre-alpha. Schema-2 now has disposable, reference-host,
-and independent clean-Linux lifecycle evidence. Production status still
-requires an independent real-Amnezia/Tailscale rollout plus the stable-release
-security and artifact gates below.
+independent clean-Linux, and second-provider real-Amnezia server lifecycle
+evidence. Production status still requires external-client acceptance on that
+second provider plus the stable-release security and artifact gates below.
 
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
@@ -12,13 +12,13 @@ security and artifact gates below.
 | Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Passed on the reference host and an independent Ubuntu host |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
-| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; shared live matrix pending |
-| Restart lifecycle | Host reboot, Docker restart and source recreation | Reference-host reboot/recreation and independent same-ID watchdog plus new-ID reconcile pass; independent real-Amnezia reboot remains |
+| Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; managed-Tailscale XRay live outages pass on two providers; second-provider external tunnel-client outage smoke remains |
+| Restart lifecycle | Host reboot, Docker restart and source recreation | Reference-host and second-provider real-Amnezia reboot/reconciliation pass; independent same-ID watchdog and new-ID reconcile also pass |
 | Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Clean-host packaging plus active independent-host upgrade, downgrade, verification, uninstall and exact cleanup pass |
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
 | Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2 and watchdog recovery; clean-reader validation pending |
-| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Combined XRay and external AWG2 exact-domain canaries pass; the staged subnet/container expansion and systemd start pass without source restart or route drift |
+| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Combined XRay and external AWG2 reference canaries pass; second-provider server lifecycle passes, but its external-client smoke remains |
 
 ## Release levels
 

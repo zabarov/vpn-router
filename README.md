@@ -18,10 +18,10 @@ Status: `0.5.0-pre-alpha`. IPv4/TCP generators, tunnel and proxy-container
 capture, fail-closed behavior, configuration migration, installation, and the
 operator switch are implemented. Kernel network-namespace tracking and an
 opt-in recovery timer cover source stop/start and recreation without overriding
-the manual switch. Reference-host reboot, source recreation, and active
-downgrade acceptance pass; independent-host recovery acceptance is still
-required. The release remains pre-alpha until the compatibility matrix and
-reproducible release-artifact gates are complete.
+the manual switch. Reference-host and second-provider real-Amnezia server
+reboot, source restart, active downgrade, and reinstall acceptance pass. The
+release remains pre-alpha until the second-provider external-client smoke,
+compatibility matrix, and reproducible release-artifact gates are complete.
 
 ## Supported topology
 

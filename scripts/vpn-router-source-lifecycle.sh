@@ -348,7 +348,10 @@ start_egress() {
     -e "TS_AUTHKEY=$auth_value" -e "TS_EXTRA_ARGS=--exit-node=$exit_node --exit-node-allow-lan-access=false --accept-routes=false --accept-dns=false" \
     -e TS_STATE_DIR=/var/lib/tailscale -e TS_USERSPACE=true -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
   docker network connect --gw-priority -1 --alias "$EGRESS_NAME" "$PROXY_NETWORK" "$EGRESS_NAME"
-  wait_tailscale_ready
+  if ! wait_tailscale_ready; then
+    echo 'enable=FAIL: managed Tailscale egress did not become ready before auth-key scrubbing' >&2
+    return 1
+  fi
   if [[ -n "$auth_value" ]]; then
     docker rm -f "$EGRESS_NAME" >/dev/null
     auth_value=''; unset "$auth_env" || true
@@ -358,7 +361,10 @@ start_egress() {
       -e TS_AUTHKEY= -e "TS_EXTRA_ARGS=--exit-node=$exit_node --exit-node-allow-lan-access=false --accept-routes=false --accept-dns=false" \
       -e TS_STATE_DIR=/var/lib/tailscale -e TS_USERSPACE=true -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
     docker network connect --gw-priority -1 --alias "$EGRESS_NAME" "$PROXY_NETWORK" "$EGRESS_NAME"
-    wait_tailscale_ready
+    if ! wait_tailscale_ready; then
+      echo 'enable=FAIL: managed Tailscale egress did not recover after auth-key scrubbing' >&2
+      return 1
+    fi
   fi
 }
 

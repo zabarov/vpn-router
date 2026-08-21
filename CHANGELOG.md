@@ -34,6 +34,13 @@ All notable changes are documented here.
   retains the strict network health probes.
 - Record successful reference-host reboot recovery, AWG2 and XRay source
   recreation, active downgrade and return, and fresh external routing smoke.
+- Require managed Tailscale readiness before removing the one-off enrollment
+  key and again after credential-free recreation, preventing an unsuccessful
+  enrollment from being silently replaced by an unauthenticated container.
+- Record a sanitized second-provider Ubuntu 24.04 real-Amnezia server run with
+  simultaneous AWG2/XRay discovery, managed-Tailscale enrollment, strict/direct
+  separation, fail-closed outage recovery, reboot, namespace restart,
+  downgrade, uninstall, and state-preserving reinstall.
 
 ## 0.4.0-pre-alpha - Unreleased
 
