@@ -296,8 +296,10 @@ preflight() {
   done < <(groups_tsv)
   for name in "$CONTROL_NETWORK" "$PROXY_NETWORK"; do
     if network_exists "$name"; then
-      [[ "$managed_active" == true ]] && [[ $(docker network inspect -f '{{index .Labels "io.github.rim.vpn-router.owner"}}' "$name") == "$SERVICE_NAME" ]] \
-        || { echo "preflight=FAIL: Docker network name is already owned by another runtime: $name" >&2; return 1; }
+      if [[ "$managed_active" != true ]] || [[ $(docker network inspect -f '{{index .Labels "io.github.rim.vpn-router.owner"}}' "$name") != "$SERVICE_NAME" ]]; then
+        echo "preflight=FAIL: Docker network name is already owned by another runtime: $name" >&2
+        return 1
+      fi
     fi
   done
   if docker inspect "$EGRESS_NAME" >/dev/null 2>&1; then
@@ -497,14 +499,14 @@ rollback_runtime() {
   source "$MANIFEST"; backup=$MANIFEST_BACKUP_DIR
   if [[ "$MANIFEST_STATUS" =~ ^(disabled|rolled_back)$ ]] && owned_absent; then cancel_deadman; [[ "$command_name" == disable ]] && echo 'disable=ALREADY_DISABLED' || echo 'rollback=ALREADY_ROLLED_BACK'; return 0; fi
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
-    owned_container "$capture" && docker rm -f "$capture" >/dev/null || true
-    owned_container "$dns" && docker rm -f "$dns" >/dev/null || true
+    if owned_container "$capture"; then docker rm -f "$capture" >/dev/null || true; fi
+    if owned_container "$dns"; then docker rm -f "$dns" >/dev/null || true; fi
     if [[ "$namespace" == container ]]; then
       stored_id=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv")
       current_id=$(docker inspect -f '{{.Id}}' "$container" 2>/dev/null || true)
       if [[ "$current_id" == "$stored_id" ]]; then
         group_exec "$namespace" "$container" nft delete table inet "$NFTABLES_TABLE" >/dev/null 2>&1 || true
-        network_exists "$PROXY_NETWORK" && docker network disconnect -f "$PROXY_NETWORK" "$container" >/dev/null 2>&1 || true
+        if network_exists "$PROXY_NETWORK"; then docker network disconnect -f "$PROXY_NETWORK" "$container" >/dev/null 2>&1 || true; fi
       elif [[ "$allow_source_change" != true ]]; then
         echo "rollback=FAIL: source container changed: $container" >&2; ok=false
       fi
@@ -512,9 +514,9 @@ rollback_runtime() {
       group_exec host none nft delete table inet "$NFTABLES_TABLE" >/dev/null 2>&1 || true
     fi
   done < <(groups_tsv)
-  owned_container "$EGRESS_NAME" && docker rm -f "$EGRESS_NAME" >/dev/null || true
-  network_exists "$PROXY_NETWORK" && docker network rm "$PROXY_NETWORK" >/dev/null 2>&1 || true
-  network_exists "$CONTROL_NETWORK" && docker network rm "$CONTROL_NETWORK" >/dev/null 2>&1 || true
+  if owned_container "$EGRESS_NAME"; then docker rm -f "$EGRESS_NAME" >/dev/null || true; fi
+  if network_exists "$PROXY_NETWORK"; then docker network rm "$PROXY_NETWORK" >/dev/null 2>&1 || true; fi
+  if network_exists "$CONTROL_NETWORK"; then docker network rm "$CONTROL_NETWORK" >/dev/null 2>&1 || true; fi
   rm -f "$EGRESS_PROXY_IP_FILE"
   owned_absent || ok=false
   [[ "$allow_source_change" == true ]] || verify_baseline "$backup" || ok=false
