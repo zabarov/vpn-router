@@ -12,7 +12,7 @@ egresses:
   - { tag: direct, type: direct }
   - tag: strict-egress
     type: socks5
-    server: 172.31.20.40
+    server: 198.18.30.40
     port: 1080
     healthcheck_url: https://example.com/
 

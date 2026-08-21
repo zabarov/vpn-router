@@ -214,19 +214,21 @@ write_command_wrapper() {
   mv -f "$temporary" "$bin_path/vpn-router"
 }
 
-write_systemd_unit() {
-  local node_path=$1 unit_path unit_temp
+write_systemd_units() {
+  local node_path=$1 unit_name unit_path unit_temp
   [[ "$systemd_enabled" == true ]] || return 0
-  unit_path=$(physical '/etc/systemd/system/vpn-router.service')
-  unit_temp="$unit_path.$$.tmp"
-  mkdir -p "$(dirname -- "$unit_path")"
-  sed \
-    -e "s|@CONFIG_PATH@|$config_dir/router.yaml|g" \
-    -e "s|@NODE_PATH@|$node_path|g" \
-    -e "s|@CURRENT_PATH@|$prefix/current|g" \
-    "$source_dir/deploy/systemd/vpn-router.service" >"$unit_temp"
-  chmod 644 "$unit_temp"
-  mv -f "$unit_temp" "$unit_path"
+  for unit_name in vpn-router.service vpn-router-watchdog.service vpn-router-watchdog.timer; do
+    unit_path=$(physical "/etc/systemd/system/$unit_name")
+    unit_temp="$unit_path.$$.tmp"
+    mkdir -p "$(dirname -- "$unit_path")"
+    sed \
+      -e "s|@CONFIG_PATH@|$config_dir/router.yaml|g" \
+      -e "s|@NODE_PATH@|$node_path|g" \
+      -e "s|@CURRENT_PATH@|$prefix/current|g" \
+      "$source_dir/deploy/systemd/$unit_name" >"$unit_temp"
+    chmod 644 "$unit_temp"
+    mv -f "$unit_temp" "$unit_path"
+  done
   if [[ "$root" == / ]]; then systemctl daemon-reload; fi
 }
 
@@ -270,7 +272,7 @@ install_release() {
   mv -Tf "$current_link.new" "$current_link"
   if [[ -n "$old_current" && "$old_current" != "$release_dir" ]]; then ln -sfn "$old_current" "$previous_link"; fi
   write_command_wrapper "$node_path"
-  write_systemd_unit "$node_path"
+  write_systemd_units "$node_path"
   cp -f "$source_dir/config.example.yaml" "$config_path/router.yaml.example" 2>/dev/null || true
   chmod 600 "$config_path/router.yaml.example" 2>/dev/null || true
   umask 077
@@ -313,7 +315,7 @@ rollback_version() {
   mv -Tf "$current_link.new" "$current_link"
   ln -sfn "$current" "$previous_link"
   write_command_wrapper "$node_path"
-  write_systemd_unit "$node_path"
+  write_systemd_units "$node_path"
   echo 'rollback-version=PASS'
   echo "release=$(basename -- "$previous")"
 }
@@ -329,6 +331,9 @@ uninstall_release() {
   fi
   local active_manifest=false
   [[ -n "$service_name" && -f "$(physical "/var/lib/$service_name/runtime/manifest.env")" ]] && active_manifest=true
+  if [[ "$root" == / && "$systemd_enabled" == true ]]; then
+    systemctl disable --now vpn-router-watchdog.timer >/dev/null 2>&1 || true
+  fi
   if [[ "$root" == / && "$systemd_enabled" == true && -f /etc/systemd/system/vpn-router.service ]]; then
     if systemctl is-active --quiet vpn-router.service; then
       systemctl disable --now vpn-router.service >/dev/null 2>&1 || {
@@ -345,7 +350,10 @@ uninstall_release() {
       return 1
     }
   fi
-  rm -f "$bin_path/vpn-router" "$(physical '/etc/systemd/system/vpn-router.service')"
+  rm -f "$bin_path/vpn-router" \
+    "$(physical '/etc/systemd/system/vpn-router.service')" \
+    "$(physical '/etc/systemd/system/vpn-router-watchdog.service')" \
+    "$(physical '/etc/systemd/system/vpn-router-watchdog.timer')"
   rm -rf "$prefix_path"
   if [[ "$purge" == true ]]; then
     [[ -z "$service_name" ]] || rm -rf "$(physical "/var/lib/$service_name")"

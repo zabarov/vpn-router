@@ -57,7 +57,7 @@ services:
       - ${VPN_ROUTER_LAB_NFTABLES_CONFIG:?Render the lab nftables config first}:/etc/vpn-router/generated.nft:ro
     networks:
       lab:
-        ipv4_address: 172.30.20.10
+        ipv4_address: 198.18.20.10
     healthcheck:
       test: ["CMD-SHELL", "nft list table inet vpn_router_lab >/dev/null 2>&1 && ip netns exec canary-client ip route show default >/dev/null 2>&1 && ip netns exec selected-client ip route show default >/dev/null 2>&1 && ip netns exec control-client ip route show default >/dev/null 2>&1"]
       interval: 1s
@@ -122,7 +122,7 @@ services:
       - ./upstream-dnsmasq.conf:/etc/dnsmasq.conf:ro
     networks:
       lab:
-        ipv4_address: 172.30.20.50
+        ipv4_address: 198.18.20.50
     healthcheck:
       test: ["CMD-SHELL", "grep -q ':0035 ' /proc/net/udp || grep -q ':0035 ' /proc/net/udp6"]
       interval: 1s
@@ -136,7 +136,7 @@ services:
       - ./socks-egress.json:/etc/sing-box/config.json:ro
     networks:
       lab:
-        ipv4_address: 172.30.20.40
+        ipv4_address: 198.18.20.40
     healthcheck:
       test: ["CMD-SHELL", "grep -q ':0438 ' /proc/net/tcp || grep -q ':0438 ' /proc/net/tcp6"]
       interval: 1s
@@ -154,7 +154,7 @@ services:
         done
     networks:
       lab:
-        ipv4_address: 172.30.20.20
+        ipv4_address: 198.18.20.20
 
   direct-target:
     image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
@@ -167,10 +167,10 @@ services:
         done
     networks:
       lab:
-        ipv4_address: 172.30.20.30
+        ipv4_address: 198.18.20.30
 
 networks:
   lab:
     ipam:
       config:
-        - subnet: 172.30.20.0/24
+        - subnet: 198.18.20.0/24

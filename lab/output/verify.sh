@@ -38,27 +38,27 @@ wait_source() {
   return 1
 }
 
-[ "$(fetch_source 172.31.20.30)" = direct-target ]
-[ "$(fetch_control 172.31.20.20)" = strict-target ]
-if [ "$($compose exec -T source dig @127.0.0.1 strict.test A +short)" != 172.31.20.20 ]; then
+[ "$(fetch_source 198.18.30.30)" = direct-target ]
+[ "$(fetch_control 198.18.30.20)" = strict-target ]
+if [ "$($compose exec -T source dig @127.0.0.1 strict.test A +short)" != 198.18.30.20 ]; then
   $compose exec -T source nft list table inet vpn_router_output >&2 || true
   $compose exec -T source netstat -lnup >&2 || true
   $compose logs --no-color dns upstream-dns >&2 || true
   exit 1
 fi
-$compose exec -T source nft get element inet vpn_router_output set_strict_target_dns '{ 172.31.20.20 }' >/dev/null
-[ "$(fetch_source 172.31.20.20)" = strict-target ]
+$compose exec -T source nft get element inet vpn_router_output set_strict_target_dns '{ 198.18.30.20 }' >/dev/null
+[ "$(fetch_source 198.18.30.20)" = strict-target ]
 
 $compose stop socks-egress >/dev/null
-blocked 172.31.20.20
-[ "$(fetch_source 172.31.20.30)" = direct-target ]
+blocked 198.18.30.20
+[ "$(fetch_source 198.18.30.30)" = direct-target ]
 $compose start socks-egress >/dev/null
-wait_source 172.31.20.20 strict-target
+wait_source 198.18.30.20 strict-target
 
 $compose stop capture >/dev/null
-blocked 172.31.20.20
-[ "$(fetch_source 172.31.20.30)" = direct-target ]
-[ "$(fetch_control 172.31.20.20)" = strict-target ]
+blocked 198.18.30.20
+[ "$(fetch_source 198.18.30.30)" = direct-target ]
+[ "$(fetch_control 198.18.30.20)" = strict-target ]
 
 cleanup
 trap - EXIT INT TERM

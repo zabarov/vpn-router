@@ -7,16 +7,44 @@ repo_dir=$(cd -- "$lab_dir/../.." && pwd)
 runtime_root=${VPN_ROUTER_RUNTIME_ROOT:-$repo_dir}
 lifecycle="$runtime_root/scripts/vpn-router-lifecycle.sh"
 service_helper="$runtime_root/scripts/vpn-router-service.sh"
+watchdog_helper="$runtime_root/scripts/vpn-router-watchdog.sh"
 config_path="$lab_dir/config.yaml"
 runtime_dir=$(mktemp -d /tmp/vpn-router-host-lab.XXXXXX)
+installed_acceptance=${VPN_ROUTER_INSTALLED_ACCEPTANCE:-false}
+install_dependencies=${VPN_ROUTER_INSTALL_DEPENDENCIES:-false}
+candidate_source=${VPN_ROUTER_CANDIDATE_SOURCE:-$repo_dir}
+installed_cleaned=false
 strict_pid=''
 direct_pid=''
+
+container_is_running() { [[ $(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true) == true ]]; }
+verify_backup_checksums() {
+  # shellcheck disable=SC1091
+  source /var/lib/vpr-host-lab/runtime/multi-source-manifest.env
+  (cd "$MANIFEST_BACKUP_DIR" && sha256sum -c SHA256SUMS >/dev/null)
+}
 
 [[ $(uname -s) == Linux ]] || { echo 'linux_interface_lab=SKIP_NON_LINUX'; exit 0; }
 [[ $EUID -eq 0 ]] || { echo 'linux_interface_lab=FAIL: root privileges are required' >&2; exit 1; }
 
 cleanup() {
   local status=$?
+  if [[ "$installed_acceptance" == true && "$installed_cleaned" != true ]]; then
+    vpn-router service-disable >/dev/null 2>&1 || true
+    "$lifecycle" disable --config "$config_path" >/dev/null 2>&1 || true
+    while read -r owned_id; do [[ -z "$owned_id" ]] || docker rm -f "$owned_id" >/dev/null 2>&1 || true; done \
+      < <(docker ps -aq --filter 'label=io.github.rim.vpn-router.owner=vpr-host-lab')
+    nft delete table inet vpr_host_lab >/dev/null 2>&1 || true
+    if container_is_running vpr-proxy-source; then
+      nsenter --target "$(docker inspect -f '{{.State.Pid}}' vpr-proxy-source)" --net -- \
+        nft delete table inet vpr_host_lab >/dev/null 2>&1 || true
+    fi
+    while read -r owned_network; do
+      [[ -z "$owned_network" ]] || docker network disconnect -f "$owned_network" vpr-proxy-source >/dev/null 2>&1 || true
+      [[ -z "$owned_network" ]] || docker network rm "$owned_network" >/dev/null 2>&1 || true
+    done < <(docker network ls -q --filter 'label=io.github.rim.vpn-router.owner=vpr-host-lab')
+    "$candidate_source/install.sh" uninstall --purge >/dev/null 2>&1 || true
+  fi
   "$lifecycle" disable --config "$config_path" >/dev/null 2>&1 || true
   systemctl stop vpr-host-lab-deadman.timer vpr-host-lab-deadman.service >/dev/null 2>&1 || true
   docker rm -f vpr-proxy-source vpr-host-lab-socks >/dev/null 2>&1 || true
@@ -118,6 +146,24 @@ done
 
 sleep 3
 
+if [[ "$installed_acceptance" == true ]]; then
+  [[ ! -e /var/lib/vpn-router-installer/install.env ]] || {
+    echo 'multi_source_linux_lifecycle_lab=FAIL: installed acceptance requires a clean host' >&2
+    exit 1
+  }
+  install_args=(install)
+  [[ "$install_dependencies" != true ]] || install_args+=(--install-dependencies)
+  "$candidate_source/install.sh" "${install_args[@]}"
+  install -m 0600 "$config_path" /etc/vpn-router/router.yaml
+  # shellcheck disable=SC1091
+  source /var/lib/vpn-router-installer/install.env
+  export VPN_ROUTER_NODE="$INSTALL_NODE"
+  runtime_root=/opt/vpn-router/current
+  lifecycle="$runtime_root/scripts/vpn-router-lifecycle.sh"
+  service_helper="$runtime_root/scripts/vpn-router-service.sh"
+  watchdog_helper="$runtime_root/scripts/vpn-router-watchdog.sh"
+fi
+
 "$lifecycle" preflight --config "$config_path"
 "$lifecycle" enable --config "$config_path" --rollback-after 120
 assert_response 192.0.2.20 strict-target
@@ -144,6 +190,20 @@ docker start vpr-host-lab-capture-host vpr-host-lab-capture-proxy-vpn >/dev/null
 sleep 2
 "$lifecycle" verify --config "$config_path" --cancel-deadman
 
+same_proxy_id=$(docker inspect -f '{{.Id}}' vpr-proxy-source)
+docker stop vpr-proxy-source >/dev/null
+docker start vpr-proxy-source >/dev/null
+[[ $(docker inspect -f '{{.Id}}' vpr-proxy-source) == "$same_proxy_id" ]]
+if "$lifecycle" status --config "$config_path" >/dev/null 2>&1; then
+  echo 'multi_source_linux_lifecycle_lab=FAIL: same-ID namespace replacement was not detected' >&2
+  exit 1
+fi
+VPN_ROUTER_CONFIG="$config_path" "$watchdog_helper"
+[[ $(proxy_fetch 192.0.2.20) == strict-target ]]
+[[ $(proxy_fetch 192.0.2.30) == direct-target ]]
+"$lifecycle" verify --config "$config_path"
+verify_backup_checksums
+
 old_proxy_id=$(docker inspect -f '{{.Id}}' vpr-proxy-source)
 docker rm -f vpr-proxy-source >/dev/null
 start_proxy_source
@@ -156,9 +216,11 @@ fi
 [[ $(proxy_fetch 192.0.2.20) == strict-target ]]
 [[ $(proxy_fetch 192.0.2.30) == direct-target ]]
 "$lifecycle" verify --config "$config_path" --cancel-deadman
+verify_backup_checksums
 
 "$lifecycle" disable --config "$config_path"
 "$lifecycle" disable --config "$config_path"
+[[ $(VPN_ROUTER_CONFIG="$config_path" "$watchdog_helper") == watchdog=NO_ACTION ]]
 assert_response 192.0.2.20 strict-target
 assert_response 192.0.2.30 direct-target
 [[ $(proxy_fetch 192.0.2.20) == strict-target ]]
@@ -170,5 +232,53 @@ VPN_ROUTER_CONFIG="$config_path" VPN_ROUTER_BOOT_WAIT_SECONDS=30 VPN_ROUTER_BOOT
 assert_response 192.0.2.20 strict-target
 VPN_ROUTER_CONFIG="$config_path" "$service_helper" stop
 assert_response 192.0.2.20 strict-target
+
+if [[ "$installed_acceptance" == true ]]; then
+  vpn-router service-enable
+  systemctl is-active --quiet vpn-router.service
+  systemctl is-active --quiet vpn-router-watchdog.timer
+
+  installed_proxy_id=$(docker inspect -f '{{.Id}}' vpr-proxy-source)
+  docker stop vpr-proxy-source >/dev/null
+  docker start vpr-proxy-source >/dev/null
+  [[ $(docker inspect -f '{{.Id}}' vpr-proxy-source) == "$installed_proxy_id" ]]
+  recovered=false
+  for _attempt in {1..100}; do
+    if vpn-router status >/dev/null 2>&1; then recovered=true; break; fi
+    sleep 2
+  done
+  [[ "$recovered" == true ]] || {
+    journalctl -u vpn-router-watchdog.service --since '-5 minutes' --no-pager >&2 || true
+    echo 'multi_source_linux_lifecycle_lab=FAIL: installed watchdog did not recover the same-ID restart' >&2
+    exit 1
+  }
+  vpn-router verify
+  [[ $(proxy_fetch 192.0.2.20) == strict-target ]]
+  [[ $(proxy_fetch 192.0.2.30) == direct-target ]]
+
+  old_release=$(readlink /opt/vpn-router/current)
+  candidate_next="$runtime_dir/candidate-next"
+  mkdir -p "$candidate_next"
+  cp -a "$candidate_source/." "$candidate_next/"
+  printf '\n' >>"$candidate_next/bin/vpn-router.mjs"
+  "$candidate_next/install.sh" upgrade
+  new_release=$(readlink /opt/vpn-router/current)
+  [[ "$new_release" != "$old_release" ]]
+  vpn-router verify
+  "$candidate_next/install.sh" rollback-version
+  [[ $(readlink /opt/vpn-router/current) == "$old_release" ]]
+  vpn-router verify
+
+  vpn-router service-disable
+  [[ $(proxy_fetch 192.0.2.20) == strict-target ]]
+  "$candidate_source/install.sh" uninstall --purge
+  installed_cleaned=true
+  [[ ! -e /usr/local/sbin/vpn-router ]]
+  [[ ! -e /opt/vpn-router ]]
+  [[ ! -e /etc/systemd/system/vpn-router.service ]]
+  [[ ! -e /etc/systemd/system/vpn-router-watchdog.timer ]]
+  container_running_after_uninstall=$(docker inspect -f '{{.State.Running}}' vpr-proxy-source)
+  [[ "$container_running_after_uninstall" == true ]]
+fi
 
 echo 'multi_source_linux_lifecycle_lab=PASS'

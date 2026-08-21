@@ -93,17 +93,23 @@ case "$command_name" in
     [[ $# -eq 0 ]] || { usage; exit 2; }
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$default_config" >/dev/null
     systemctl enable --now vpn-router.service
+    if ! systemctl enable --now vpn-router-watchdog.timer; then
+      systemctl disable --now vpn-router.service >/dev/null 2>&1 || true
+      echo 'service-enable=FAIL: watchdog timer could not start; routing was disabled again' >&2
+      exit 1
+    fi
     echo 'service-enable=PASS'
     ;;
   service-disable)
     [[ $EUID -eq 0 ]] || { echo 'service-disable=FAIL: root privileges are required' >&2; exit 1; }
     [[ $# -eq 0 ]] || { usage; exit 2; }
+    systemctl disable --now vpn-router-watchdog.timer >/dev/null 2>&1 || true
     systemctl disable --now vpn-router.service
     echo 'service-disable=PASS'
     ;;
   service-status)
     [[ $# -eq 0 ]] || { usage; exit 2; }
-    exec systemctl status vpn-router.service
+    exec systemctl status vpn-router.service vpn-router-watchdog.timer
     ;;
   -h|--help|help|'')
     usage

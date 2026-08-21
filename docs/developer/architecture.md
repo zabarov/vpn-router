@@ -73,8 +73,14 @@ all sources transactionally. Failure in one source rolls back the whole apply.
 
 `disable` is the master switch. It removes only the manifest-owned nftables
 tables, capture/DNS/egress containers, project networks, and attachments. It
-preserves source VPNs and Tailscale state. `reconcile` detects source-container
-recreation and restores owned resources only after safe cleanup.
+preserves source VPNs and Tailscale state. Each container namespace has a
+recorded kernel identity in addition to its Docker ID. `reconcile` detects a
+stop/start or recreation even when Docker keeps the same ID, then replaces only
+the affected owned sidecars while the nftables guard remains fail-closed. When
+the source itself has a new namespace, its root-only clean source baseline is
+refreshed before project resources are attached; the superseded baseline is
+archived as recovery evidence. The optional watchdog invokes this path
+periodically but never re-enables a disabled manifest.
 
 ## Protocol boundary
 

@@ -26,7 +26,7 @@ services:
       retries: 30
     networks:
       lab:
-        ipv4_address: 172.30.10.10
+        ipv4_address: 198.18.10.10
 
   sidecar:
     image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
@@ -47,4 +47,4 @@ networks:
   lab:
     ipam:
       config:
-        - subnet: 172.30.10.0/24
+        - subnet: 198.18.10.0/24

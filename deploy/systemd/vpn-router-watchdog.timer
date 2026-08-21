@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodically verify VPN Router runtime ownership
+Documentation=https://github.com/zabarov/vpn-router
+PartOf=vpn-router.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=15s
+RandomizedDelaySec=10s
+Unit=vpn-router-watchdog.service
+
+[Install]
+WantedBy=timers.target

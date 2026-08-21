@@ -16,9 +16,12 @@ containers and adds separately owned routing resources.
 
 Status: `0.5.0-pre-alpha`. IPv4/TCP generators, tunnel and proxy-container
 capture, fail-closed behavior, configuration migration, installation, and the
-operator switch are implemented. Reference-host reboot, source recreation, and
-active downgrade acceptance now pass. The release remains pre-alpha until the
-compatibility matrix and reproducible release-artifact gates are complete.
+operator switch are implemented. Kernel network-namespace tracking and an
+opt-in recovery timer cover source stop/start and recreation without overriding
+the manual switch. Reference-host reboot, source recreation, and active
+downgrade acceptance pass; independent-host recovery acceptance is still
+required. The release remains pre-alpha until the compatibility matrix and
+reproducible release-artifact gates are complete.
 
 ## Supported topology
 
@@ -86,6 +89,9 @@ sudo vpn-router status
 ```
 
 Disabling routing preserves the source VPN containers and Tailscale enrollment.
+After acceptance, `sudo vpn-router service-enable` enables boot reconciliation
+and periodic recovery. `service-disable` stops recovery before disabling the
+runtime, and a manually disabled runtime is never re-enabled by the watchdog.
 
 ## Safety boundary
 

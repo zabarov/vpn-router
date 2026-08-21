@@ -35,13 +35,14 @@ test VPN client first or pass its exact VPN address explicitly.
 
 ```sh
 sudo vpn-router status
-sudo systemctl status vpn-router.service
-sudo journalctl -u vpn-router.service --since today
+sudo systemctl status vpn-router.service vpn-router-watchdog.timer
+sudo journalctl -u vpn-router.service -u vpn-router-watchdog.service --since today
 ```
 
-`status=drifted` means the root-only manifest says routing was applied but one
-or more owned resources or health checks no longer match. Do not widen the
-client scope while drift exists.
+`status_health=drifted` means the root-only manifest says routing was applied
+but one or more owned resources or namespace identities no longer match. A
+healthy container source reports `namespace_identity=matched`. Do not widen
+the client scope while drift exists.
 
 ## Preflight never becomes ready
 
@@ -76,7 +77,11 @@ unavailable. Ordinary unselected traffic should remain direct. Restore the
 egress, run `vpn-router verify`, and use `vpn-router disable` if the strict path
 cannot be recovered promptly.
 
-## Source container was recreated
+## Source container was restarted or recreated
+
+When the systemd recovery timer is enabled, wait up to two minutes and check
+`vpn-router status`. `watchdog=DEFERRED` in the journal means the source is not
+ready yet; no routing mutation was attempted. Manual recovery is:
 
 Run:
 

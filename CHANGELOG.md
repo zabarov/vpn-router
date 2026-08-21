@@ -4,6 +4,10 @@ All notable changes are documented here.
 
 ## 0.5.0-pre-alpha - Unreleased
 
+- Added opt-in periodic recovery for container stop/start and recreation. The
+  lifecycle records kernel network-namespace identities and performs targeted,
+  fail-closed sidecar repair without overriding the manual routing switch.
+
 - Add schema version 2 with simultaneous `tunnel_interface` and
   `container_egress` sources under one strict policy and one routing switch.
 - Add read-only discovery of AmneziaWG2, WireGuard-compatible tunnels, and

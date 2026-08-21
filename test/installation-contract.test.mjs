@@ -6,7 +6,11 @@ const install = await readFile(new URL('../install.sh', import.meta.url), 'utf8'
 const command = await readFile(new URL('../scripts/vpn-router-command.sh', import.meta.url), 'utf8');
 const service = await readFile(new URL('../scripts/vpn-router-service.sh', import.meta.url), 'utf8');
 const unit = await readFile(new URL('../deploy/systemd/vpn-router.service', import.meta.url), 'utf8');
+const watchdog = await readFile(new URL('../scripts/vpn-router-watchdog.sh', import.meta.url), 'utf8');
+const watchdogUnit = await readFile(new URL('../deploy/systemd/vpn-router-watchdog.service', import.meta.url), 'utf8');
+const watchdogTimer = await readFile(new URL('../deploy/systemd/vpn-router-watchdog.timer', import.meta.url), 'utf8');
 const lifecycle = await readFile(new URL('../scripts/vpn-router-lifecycle.sh', import.meta.url), 'utf8');
+const sourceLifecycle = await readFile(new URL('../scripts/vpn-router-source-lifecycle.sh', import.meta.url), 'utf8');
 
 test('installer uses immutable release directories and a verified private Node runtime', () => {
   assert.match(install, /NODE_VERSION='24[.]18[.]0'/);
@@ -60,6 +64,22 @@ test('systemd boot reconciliation is explicit, bounded, and fail-closed', () => 
   assert.match(service, /deadline=\$\(\(SECONDS \+ wait_seconds\)\)/);
   assert.match(service, /reconcile --config/);
   assert.match(service, /verify --config .* --cancel-deadman/);
+});
+
+test('systemd watchdog repairs only an enabled drifted runtime and defers when preflight is unavailable', () => {
+  assert.match(watchdog, /vpn-router-lifecycle[.]sh" recover --config/);
+  assert.match(sourceLifecycle, /recover_runtime\(\)/);
+  assert.match(sourceLifecycle, /watchdog=NO_ACTION/);
+  assert.match(sourceLifecycle, /watchdog=DEFERRED/);
+  assert.match(sourceLifecycle, /repair_applied_runtime true/);
+  assert.match(sourceLifecycle, /watchdog=RECOVERED/);
+  assert.match(watchdogUnit, /Type=oneshot/);
+  assert.match(watchdogUnit, /TimeoutStartSec=600/);
+  assert.match(watchdogTimer, /OnUnitActiveSec=60s/);
+  assert.match(watchdogTimer, /PartOf=vpn-router[.]service/);
+  assert.match(install, /vpn-router[.]service vpn-router-watchdog[.]service vpn-router-watchdog[.]timer/);
+  assert.match(command, /enable --now vpn-router-watchdog[.]timer/);
+  assert.ok(command.indexOf('disable --now vpn-router-watchdog.timer') < command.lastIndexOf('disable --now vpn-router.service'));
 });
 
 test('source recreation recovery archives evidence and refuses ambiguous new resources', () => {

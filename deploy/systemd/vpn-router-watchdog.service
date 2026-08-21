@@ -1,0 +1,13 @@
+[Unit]
+Description=VPN Router runtime recovery check
+Documentation=https://github.com/zabarov/vpn-router
+After=docker.service vpn-router.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=VPN_ROUTER_CONFIG=@CONFIG_PATH@
+Environment=VPN_ROUTER_NODE=@NODE_PATH@
+ExecStart=@CURRENT_PATH@/scripts/vpn-router-watchdog.sh
+TimeoutStartSec=600
+Nice=10

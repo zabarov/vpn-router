@@ -6,6 +6,8 @@ bash -n \
   scripts/run-isolated-amneziawg2-client.sh \
   scripts/vpn-router-command.sh \
   scripts/vpn-router-service.sh \
+  scripts/vpn-router-watchdog.sh \
+  scripts/vpn-router-source-lifecycle.sh \
   scripts/vpn-router-lifecycle.sh \
   lab/linux-interface/verify.sh
 
@@ -22,6 +24,8 @@ if command -v shellcheck >/dev/null 2>&1; then
     scripts/run-isolated-amneziawg2-client.sh \
     scripts/vpn-router-command.sh \
     scripts/vpn-router-service.sh \
+    scripts/vpn-router-watchdog.sh \
+    scripts/vpn-router-source-lifecycle.sh \
     scripts/vpn-router-lifecycle.sh \
     lab/linux-interface/verify.sh \
     scripts/preflight-amneziawg2.sh \

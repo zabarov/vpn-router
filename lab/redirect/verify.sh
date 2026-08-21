@@ -83,30 +83,30 @@ wait_response() {
 resolve_strict() {
   docker compose -f "$compose_file" exec -T source \
     ip netns exec canary-client nslookup strict.test 192.0.2.53 \
-    | grep -Fq '172.30.20.20'
+    | grep -Fq '198.18.20.20'
 }
 
 docker compose -f "$compose_file" down --volumes --remove-orphans >/dev/null 2>&1 || true
 docker compose -f "$compose_file" up -d --wait
 sidecar_id=$(docker compose -f "$compose_file" ps -q sidecar)
 
-assert_response canary-client 172.30.20.30 direct-target
-assert_response selected-client 172.30.20.30 direct-target
-assert_response control-client 172.30.20.20 strict-target
+assert_response canary-client 198.18.20.30 direct-target
+assert_response selected-client 198.18.20.30 direct-target
+assert_response control-client 198.18.20.20 strict-target
 
 docker compose -f "$compose_file" stop socks-egress >/dev/null
 resolve_strict
 docker compose -f "$compose_file" exec -T source \
-  nft get element inet vpn_router_lab set_strict_target_dns '{ 172.30.20.20 }' >/dev/null
-assert_blocked canary-client 172.30.20.20
-assert_blocked selected-client 172.30.20.20
-assert_response canary-client 172.30.20.30 direct-target
-assert_response selected-client 172.30.20.30 direct-target
-assert_response control-client 172.30.20.20 strict-target
+  nft get element inet vpn_router_lab set_strict_target_dns '{ 198.18.20.20 }' >/dev/null
+assert_blocked canary-client 198.18.20.20
+assert_blocked selected-client 198.18.20.20
+assert_response canary-client 198.18.20.30 direct-target
+assert_response selected-client 198.18.20.30 direct-target
+assert_response control-client 198.18.20.20 strict-target
 
 docker compose -f "$compose_file" start socks-egress >/dev/null
-wait_response canary-client 172.30.20.20 strict-target
-wait_response selected-client 172.30.20.20 strict-target
+wait_response canary-client 198.18.20.20 strict-target
+wait_response selected-client 198.18.20.20 strict-target
 if [ "$(docker compose -f "$compose_file" ps -q sidecar)" != "$sidecar_id" ]; then
   echo "FAIL: strict recovery restarted the redirect sidecar instead of re-resolving the SOCKS service" >&2
   exit 1
@@ -118,25 +118,25 @@ docker compose -f "$compose_file" exec -T source nft delete table inet vpn_route
 docker compose -f "$compose_file" exec -T source nft -f - <"$subnet_nftables_config"
 resolve_strict
 docker compose -f "$compose_file" stop socks-egress >/dev/null
-assert_blocked control-client 172.30.20.20
+assert_blocked control-client 198.18.20.20
 docker compose -f "$compose_file" exec -T source nft delete table inet vpn_router_lab
 docker compose -f "$compose_file" exec -T source nft -f - <"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
 resolve_strict
-assert_response control-client 172.30.20.20 strict-target
+assert_response control-client 198.18.20.20 strict-target
 docker compose -f "$compose_file" start socks-egress >/dev/null
 sleep 2
 
 docker compose -f "$compose_file" stop dns >/dev/null
 sleep 3
 docker compose -f "$compose_file" exec -T source \
-  nft get element inet vpn_router_lab set_strict_target_dns '{ 172.30.20.20 }' >/dev/null
-assert_response canary-client 172.30.20.20 strict-target
+  nft get element inet vpn_router_lab set_strict_target_dns '{ 198.18.20.20 }' >/dev/null
+assert_response canary-client 198.18.20.20 strict-target
 
 docker compose -f "$compose_file" stop sidecar >/dev/null
-assert_blocked canary-client 172.30.20.20
-assert_blocked selected-client 172.30.20.20
-assert_response canary-client 172.30.20.30 direct-target
-assert_response control-client 172.30.20.20 strict-target
+assert_blocked canary-client 198.18.20.20
+assert_blocked selected-client 198.18.20.20
+assert_response canary-client 198.18.20.30 direct-target
+assert_response control-client 198.18.20.20 strict-target
 
 cleanup
 trap - EXIT INT TERM

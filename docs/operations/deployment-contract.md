@@ -101,8 +101,8 @@ or proxy configuration, or removes Tailscale state.
 ## Installed release and boot ownership
 
 The installer owns `/opt/vpn-router`, `/usr/local/sbin/vpn-router`,
-`/var/lib/vpn-router-installer`, and the optional
-`/etc/systemd/system/vpn-router.service`. Configuration under
+`/var/lib/vpn-router-installer`, and the optional `vpn-router.service` plus
+`vpn-router-watchdog.service` and `.timer` systemd units. Configuration under
 `/etc/vpn-router` and runtime state under `/var/lib/<service_name>` are
 preserved by default uninstall.
 
@@ -112,6 +112,9 @@ retains the old target as `previous`. It does not restart the source VPN or
 silently widen client scope.
 
 The opt-in systemd service calls `reconcile` at boot with a rollback deadman.
+Its timer then performs a structural check every minute. It acts only when the
+manifest says `applied`, defers while source preflight is unavailable, and uses
+targeted fail-closed repair rather than a whole-runtime rollback.
 If the source container identity changed, recovery archives the old manifest
 and removes only stale project-owned Compose resources. It refuses recovery if
 the replacement namespace already contains the configured nftables table or is

@@ -32,7 +32,26 @@ test('every source group owns capture, DNS, nftables, and baseline evidence', ()
   assert.match(lifecycle, /nft list table inet "\$NFTABLES_TABLE"/);
   assert.match(lifecycle, /verify_baseline/);
   assert.match(lifecycle, /source-ids[.]tsv/);
+  assert.match(lifecycle, /source-namespaces[.]tsv/);
   assert.match(lifecycle, /owned_absent/);
+});
+
+test('applied drift uses targeted fail-closed repair instead of whole-runtime rollback', () => {
+  const repairStart = lifecycle.indexOf('repair_applied_runtime()');
+  const repairEnd = lifecycle.indexOf('status_runtime()', repairStart);
+  const repair = lifecycle.slice(repairStart, repairEnd);
+  assert.match(repair, /namespace_identity/);
+  assert.match(repair, /replacement namespace already contains the project nftables table/);
+  assert.match(repair, /refresh_source_baseline/);
+  assert.match(repair, /network disconnect -f/);
+  assert.match(repair, /start_group/);
+  assert.match(repair, /fail-closed resources were preserved/);
+  assert.doesNotMatch(repair, /rollback_runtime/);
+  assert.match(lifecycle, /! -name 'SHA256SUMS[*]'/);
+
+  const reconcile = lifecycle.slice(lifecycle.lastIndexOf('reconcile)'));
+  assert.match(reconcile, /manifest_status.*applied/);
+  assert.match(reconcile, /repair_applied_runtime/);
 });
 
 test('managed Tailscale state survives disable and bootstrap credentials are scrubbed', () => {
@@ -58,12 +77,13 @@ test('strict egress readiness tolerates startup DNS delay and requires stable re
 
 test('lifecycle operations are serialized and status avoids expensive network probes', () => {
   assert.match(lifecycle, /exec 9>"\/run\/lock\/vpn-router-\$lock_key[.]lock"/);
-  assert.match(lifecycle, /status\|verify\) flock -w 600 9/);
+  assert.match(lifecycle, /status\|verify\|recover\) flock -w 600 9/);
   assert.match(lifecycle, /\*\) flock -n 9/);
 
   const statusStart = lifecycle.indexOf('status_runtime()');
   const status = lifecycle.slice(statusStart, lifecycle.indexOf('case "$command_name"', statusStart));
   assert.match(status, /status_health=structurally_healthy/);
+  assert.match(status, /namespace.*!= container.*identity_state.*matched/);
   assert.doesNotMatch(status, /healthcheck_group/);
 });
 

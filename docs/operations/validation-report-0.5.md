@@ -1,6 +1,6 @@
 # 0.5.0-pre-alpha validation report
 
-Date: 2026-08-06
+Date: 2026-08-21
 
 ## Verdict
 
@@ -9,7 +9,7 @@ pre-alpha canary. It is not production-ready.
 
 ## Passed evidence
 
-- 100 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
+- 102 unit tests, JSON Schema, shell, English-only, secret, and immutable-image
   checks pass.
 - The dependency audit reports no known production dependency vulnerability.
 - Disposable tunnel and proxy-container labs prove selected/direct separation,
@@ -55,6 +55,18 @@ pre-alpha canary. It is not production-ready.
   on a 1 GiB host. Lifecycle operations are now serialized, an existing pinned
   DNS helper image is reused, and `status` performs structural checks without
   repeating the expensive strict network probes reserved for `verify`.
+- A second independent Ubuntu 26.04 host completed a clean product install with
+  the distribution-compatible Compose dependency, simultaneous host-tunnel and
+  proxy-container sources, strict/direct separation, fail-closed SOCKS and
+  capture outages, and idempotent switching. Both same-Docker-ID stop/start and
+  new-ID recreation changed the kernel network namespace and were recovered.
+- The installed systemd watchdog detected and repaired same-ID namespace drift
+  without an operator command. The same active runtime then passed a changed-
+  tree upgrade, previous-release rollback, post-switch verification, service
+  disable, project-only purge, and uninstall. Post-run addresses, routes, rules,
+  SSH route, Docker containers, and Docker networks matched the pre-run
+  baseline; project tables, units, configuration, state, and sidecars were
+  absent. The borrowed source remained outside installer ownership.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
@@ -63,5 +75,7 @@ addresses, credentials, profiles, and raw operational logs remain private.
 
 - Add signed or reproducible release artifacts and a supported compatibility
   matrix before a stable release claim.
-- Repeat the release procedure on another independently provisioned provider
-  before promoting the compatibility claim beyond the guarded reference host.
+- Repeat this exact procedure on the independently provisioned Amnezia host
+  with managed Tailscale egress. The available SSH identities do not currently
+  authorize that host, so this report does not claim a second-provider Amnezia
+  compatibility result.

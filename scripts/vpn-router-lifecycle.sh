@@ -27,6 +27,7 @@ Usage:
   vpn-router-lifecycle.sh verify --config <router.yaml> [--cancel-deadman]
   vpn-router-lifecycle.sh rollback --config <router.yaml>
   vpn-router-lifecycle.sh reconcile --config <router.yaml> --rollback-after <60-3600>
+  vpn-router-lifecycle.sh recover --config <router.yaml>
 EOF
 }
 
@@ -50,7 +51,7 @@ while (($# > 0)); do
 done
 
 case "$command_name" in
-  preflight|enable|disable|apply|status|verify|rollback|reconcile) ;;
+  preflight|enable|disable|apply|status|verify|rollback|reconcile|recover) ;;
   *) usage; exit 2 ;;
 esac
 if [[ "$command_name" != apply && "$command_name" != enable && "$command_name" != reconcile && -n "$rollback_after" ]] \
@@ -74,6 +75,10 @@ if [[ "$CONFIG_SCHEMA_VERSION" == 2.0 ]]; then
   [[ "$cancel_deadman" == false ]] || multi_args+=(--cancel-deadman)
   [[ "$deadman_call" == false ]] || multi_args+=(--deadman-call)
   exec "$script_dir/vpn-router-source-lifecycle.sh" "${multi_args[@]}"
+fi
+if [[ "$command_name" == recover ]]; then
+  echo 'watchdog=NO_ACTION_SCHEMA_1'
+  exit 0
 fi
 
 # Work from one private immutable snapshot so validation, rendering, manifest

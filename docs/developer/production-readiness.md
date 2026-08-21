@@ -1,23 +1,23 @@
 # Production readiness
 
-The project is currently pre-alpha. The earlier tunnel-only reference
-deployment and the disposable tunnel/proxy laboratories prove important pieces,
-but the schema-2 multi-source lifecycle still requires clean-host and live
-acceptance before production status.
+The project is currently pre-alpha. Schema-2 now has disposable, reference-host,
+and independent clean-Linux lifecycle evidence. Production status still
+requires an independent real-Amnezia/Tailscale rollout plus the stable-release
+security and artifact gates below.
 
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
 | Configuration | Multi-source schema, migration, negative validation | Passed in unit and schema tests |
 | Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 passes both container-source and real host-interface paths; Linux-interface strict egress remains fixture-only |
-| Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Implemented; integrated Linux proof pending |
+| Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Passed on the reference host and an independent Ubuntu host |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
 | Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; shared live matrix pending |
-| Restart lifecycle | Host reboot, Docker restart and source recreation | Full reference-host reboot, automatic systemd reconciliation, and live AWG2/XRay recreation pass with external smoke |
-| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Clean-host packaging, active upgrade, active downgrade, return to current, and external post-switch smoke pass |
+| Restart lifecycle | Host reboot, Docker restart and source recreation | Reference-host reboot/recreation and independent same-ID watchdog plus new-ID reconcile pass; independent real-Amnezia reboot remains |
+| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Clean-host packaging plus active independent-host upgrade, downgrade, verification, uninstall and exact cleanup pass |
 | Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
-| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2; clean-reader validation pending |
+| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2 and watchdog recovery; clean-reader validation pending |
 | Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Combined XRay and external AWG2 exact-domain canaries pass; the staged subnet/container expansion and systemd start pass without source restart or route drift |
 
 ## Release levels

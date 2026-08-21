@@ -21,8 +21,8 @@ sudo ./install.sh install --install-dependencies
 ```
 
 The installer adds a private pinned Node.js runtime, immutable release
-directories, `/usr/local/sbin/vpn-router`, and a disabled-by-default systemd
-unit. It does not install or change the source VPN.
+directories, `/usr/local/sbin/vpn-router`, and disabled-by-default systemd boot
+and recovery units. It does not install or change the source VPN.
 
 ## Discover and configure
 
@@ -87,7 +87,11 @@ persisted Tailscale enrollment. It is idempotent.
 
 ## Container recreation
 
-If Amnezia recreates a configured source container:
+If Amnezia stops, starts, or recreates a configured source container, the
+enabled recovery timer detects its new network namespace within about two
+minutes and repairs only the affected project-owned sidecars. It preserves the
+strict blocking rules while sidecars recover. Manual reconciliation remains
+available:
 
 ```sh
 sudo vpn-router reconcile --rollback-after 600
@@ -98,7 +102,8 @@ Reconciliation compares stored container IDs and refuses ambiguous ownership.
 
 ## Start at boot
 
-Enable boot reconciliation only after a successful manual acceptance run:
+Enable boot reconciliation and periodic namespace recovery only after a
+successful manual acceptance run:
 
 ```sh
 sudo vpn-router service-enable
@@ -110,6 +115,11 @@ Turn boot routing off without removing the product:
 sudo vpn-router service-disable
 sudo vpn-router disable
 ```
+
+`disable` remains authoritative: the recovery timer never enables a disabled
+runtime. If a source VPN is temporarily stopped, recovery is deferred until
+preflight succeeds. `service-disable` stops the recovery timer before it stops
+the routing service.
 
 ## Upgrade and removal
 

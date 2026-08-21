@@ -26,6 +26,7 @@ Usage:
   vpn-router-source-lifecycle.sh verify --config <router.yaml> [--cancel-deadman]
   vpn-router-source-lifecycle.sh rollback --config <router.yaml>
   vpn-router-source-lifecycle.sh reconcile --config <router.yaml> --rollback-after <60-3600>
+  vpn-router-source-lifecycle.sh recover --config <router.yaml>
 EOF
 }
 
@@ -39,7 +40,7 @@ while (($# > 0)); do
   esac
 done
 
-case "$command_name" in preflight|enable|apply|disable|status|verify|rollback|reconcile) ;; *) usage; exit 2 ;; esac
+case "$command_name" in preflight|enable|apply|disable|status|verify|rollback|reconcile|recover) ;; *) usage; exit 2 ;; esac
 [[ -n "$config_path" && -f "$config_path" ]] || { usage; exit 2; }
 if [[ "$command_name" =~ ^(enable|apply|reconcile)$ ]]; then
   [[ "$rollback_after" =~ ^[0-9]+$ && "$rollback_after" -ge 60 && "$rollback_after" -le 3600 ]] || {
@@ -55,7 +56,7 @@ command -v flock >/dev/null 2>&1 || { echo 'lifecycle=FAIL: flock is required' >
 lock_key=$(printf '%s' "$config_path" | sha256sum | awk '{print substr($1,1,16)}')
 exec 9>"/run/lock/vpn-router-$lock_key.lock"
 case "$command_name" in
-  status|verify) flock -w 600 9 || { echo 'lifecycle=FAIL: timed out waiting for another lifecycle operation' >&2; exit 1; } ;;
+  status|verify|recover) flock -w 600 9 || { echo 'lifecycle=FAIL: timed out waiting for another lifecycle operation' >&2; exit 1; } ;;
   *) flock -n 9 || { echo 'lifecycle=FAIL: another lifecycle operation is already running' >&2; exit 1; } ;;
 esac
 "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$config_path" >/dev/null
@@ -115,6 +116,22 @@ group_exec() {
 container_running() { [[ $(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true) == true ]]; }
 owned_container() { docker inspect -f '{{index .Config.Labels "io.github.rim.vpn-router.owner"}}' "$1" 2>/dev/null | grep -Fxq "$SERVICE_NAME"; }
 network_exists() { docker network inspect "$1" >/dev/null 2>&1; }
+namespace_identity() {
+  local namespace=$1 container=$2 pid
+  if [[ "$namespace" == host ]]; then readlink /proc/1/ns/net; return; fi
+  pid=$(docker inspect -f '{{.State.Pid}}' "$container" 2>/dev/null || true)
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  readlink "/proc/$pid/ns/net"
+}
+source_on_proxy_network() {
+  [[ -n $(docker inspect -f "{{with index .NetworkSettings.Networks \"$PROXY_NETWORK\"}}{{.NetworkID}}{{end}}" "$1" 2>/dev/null || true) ]]
+}
+manifest_status() {
+  [[ -f "$MANIFEST" ]] || return 1
+  # shellcheck disable=SC1090
+  source "$MANIFEST"
+  printf '%s' "$MANIFEST_STATUS"
+}
 
 cancel_deadman() {
   systemctl stop "$DEADMAN_UNIT.timer" "$DEADMAN_UNIT.service" >/dev/null 2>&1 || true
@@ -181,8 +198,27 @@ verify_baseline() {
   [[ "$ok" == true ]]
 }
 
+refresh_source_baseline() {
+  local backup=$1 tag=$2 namespace=$3 container=$4 history file
+  history=$(mktemp -d "$RUNTIME_DIR/recovery-evidence/$(date -u +%Y%m%dT%H%M%SZ)-$tag.XXXXXX")
+  chmod 700 "$history"
+  for file in "$tag-addresses.json" "$tag-routes.json" "$tag-rules.json" "$tag-container.json"; do
+    [[ ! -f "$backup/$file" ]] || cp "$backup/$file" "$history/$file"
+  done
+  group_exec "$namespace" "$container" ip -j address show >"$backup/$tag-addresses.json"
+  group_exec "$namespace" "$container" ip -j route show table all >"$backup/$tag-routes.json"
+  group_exec "$namespace" "$container" ip -j rule show >"$backup/$tag-rules.json"
+  docker inspect "$container" >"$backup/$tag-container.json"
+  (
+    cd "$backup"
+    find . -maxdepth 1 -type f ! -name 'SHA256SUMS*' -print0 | sort -z | xargs -0 sha256sum >SHA256SUMS.new
+    mv SHA256SUMS.new SHA256SUMS
+  )
+  chmod 600 "$backup"/* "$history"/*
+}
+
 write_manifest() {
-  local status=$1 backup=$2 config_hash plan_hash
+  local status=$1 backup=$2 config_hash plan_hash tag namespace container source_tag capture dns
   config_hash=$(sha256sum "$STORED_CONFIG" | awk '{print $1}')
   plan_hash=$(sha256sum "$STORED_PLAN" | awk '{print $1}')
   umask 077
@@ -191,10 +227,15 @@ write_manifest() {
     printf 'MANIFEST_CONFIG_SHA256=%q\nMANIFEST_PLAN_SHA256=%q\n' "$config_hash" "$plan_hash"
     printf 'MANIFEST_BACKUP_DIR=%q\n' "$backup"
   } >"$MANIFEST"
+  : >"$RUNTIME_DIR/source-ids.tsv"
+  : >"$RUNTIME_DIR/source-namespaces.tsv"
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
-    [[ "$namespace" == container ]] && printf '%s=%s\n' "$tag" "$(docker inspect -f '{{.Id}}' "$container")"
-  done < <(groups_tsv) >"$RUNTIME_DIR/source-ids.tsv"
-  chmod 600 "$MANIFEST" "$RUNTIME_DIR/source-ids.tsv"
+    if [[ "$namespace" == container ]]; then
+      printf '%s=%s\n' "$tag" "$(docker inspect -f '{{.Id}}' "$container")" >>"$RUNTIME_DIR/source-ids.tsv"
+      printf '%s=%s\n' "$tag" "$(namespace_identity "$namespace" "$container")" >>"$RUNTIME_DIR/source-namespaces.tsv"
+    fi
+  done < <(groups_tsv)
+  chmod 600 "$MANIFEST" "$RUNTIME_DIR/source-ids.tsv" "$RUNTIME_DIR/source-namespaces.tsv"
 }
 
 require_manifest_match() {
@@ -243,7 +284,10 @@ preflight() {
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     for name in "$capture" "$dns"; do
       if docker inspect "$name" >/dev/null 2>&1; then
-        [[ "$managed_active" == true ]] && owned_container "$name" || { echo "preflight=FAIL: container name is already occupied or drifted: $name" >&2; return 1; }
+        if [[ "$managed_active" != true ]] || ! owned_container "$name"; then
+          echo "preflight=FAIL: container name is already occupied or drifted: $name" >&2
+          return 1
+        fi
       fi
     done
     if group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1; then
@@ -257,7 +301,10 @@ preflight() {
     fi
   done
   if docker inspect "$EGRESS_NAME" >/dev/null 2>&1; then
-    [[ "$managed_active" == true ]] && owned_container "$EGRESS_NAME" || { echo "preflight=FAIL: egress container name is already occupied or drifted: $EGRESS_NAME" >&2; return 1; }
+    if [[ "$managed_active" != true ]] || ! owned_container "$EGRESS_NAME"; then
+      echo "preflight=FAIL: egress container name is already occupied or drifted: $EGRESS_NAME" >&2
+      return 1
+    fi
   fi
   if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
     docker network connect --help | grep -Fq -- '--gw-priority'
@@ -336,7 +383,8 @@ pin_tailscale_proxy_ip() {
 }
 
 start_group() {
-  local tag=$1 namespace=$2 container=$3 source_tag=$4 capture=$5 dns=$6 dir="$ARTIFACT_DIR/$tag" network_args
+  local tag=$1 namespace=$2 container=$3 source_tag=$4 capture=$5 dns=$6 network_args
+  local dir="$ARTIFACT_DIR/$tag"
   if [[ "$namespace" == host ]]; then network_args=(--network host); else network_args=(--network "container:$container"); fi
   group_exec "$namespace" "$container" nft -f - <"$dir/router.nft"
   if [[ "$MANAGED_DNS" == true ]]; then
@@ -405,14 +453,25 @@ capture_failure_diagnostics() {
 }
 
 verify_applied() {
-  local tag namespace container source_tag capture dns
+  local tag namespace container source_tag capture dns stored_id current_id stored_namespace current_namespace
   require_manifest_match || { echo 'verify=FAIL: manifest or configuration mismatch' >&2; return 1; }
   # shellcheck disable=SC1090
   source "$MANIFEST"
   [[ "$MANIFEST_STATUS" == applied ]] || { echo "verify=FAIL: manifest status is $MANIFEST_STATUS" >&2; return 1; }
   [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]] || { container_running "$EGRESS_NAME" && owned_container "$EGRESS_NAME"; } || { echo 'verify=FAIL: managed egress is not running or not owned' >&2; return 1; }
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
-    container_running "$capture" && owned_container "$capture" || { echo "verify=FAIL: capture is not running or not owned for source group $tag" >&2; return 1; }
+    if [[ "$namespace" == container ]]; then
+      stored_id=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv")
+      stored_namespace=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-namespaces.tsv" 2>/dev/null || true)
+      current_id=$(docker inspect -f '{{.Id}}' "$container" 2>/dev/null || true)
+      current_namespace=$(namespace_identity "$namespace" "$container" 2>/dev/null || true)
+      [[ -n "$stored_namespace" && "$stored_id" == "$current_id" && "$stored_namespace" == "$current_namespace" ]] \
+        || { echo "verify=FAIL: source namespace identity changed for source group $tag" >&2; return 1; }
+    fi
+    if ! container_running "$capture" || ! owned_container "$capture"; then
+      echo "verify=FAIL: capture is not running or not owned for source group $tag" >&2
+      return 1
+    fi
     [[ "$MANAGED_DNS" != true ]] || { container_running "$dns" && owned_container "$dns"; } || { echo "verify=FAIL: managed DNS is not running or not owned for source group $tag" >&2; return 1; }
     group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1 || { echo "verify=FAIL: nftables table is absent for source group $tag" >&2; return 1; }
     healthcheck_group "$namespace" "$container" || { echo "verify=FAIL: strict egress healthcheck failed for source group $tag" >&2; return 1; }
@@ -490,23 +549,128 @@ apply_runtime() {
   echo 'enable=PASS'
 }
 
+repair_applied_runtime() {
+  local preflight_done=${1:-false}
+  local tag namespace container source_tag capture dns backup stored_id current_id stored_namespace current_namespace table_present=false rebuild=false repaired=false identity_changed=false
+  require_manifest_match || { echo 'reconcile=FAIL: manifest or configuration mismatch' >&2; return 1; }
+  # shellcheck disable=SC1090
+  source "$MANIFEST"
+  [[ "$MANIFEST_STATUS" == applied ]] || { echo "reconcile=FAIL: manifest status is $MANIFEST_STATUS" >&2; return 1; }
+  backup=$MANIFEST_BACKUP_DIR
+  mkdir -p "$RUNTIME_DIR/recovery-evidence"; chmod 700 "$RUNTIME_DIR/recovery-evidence"
+  [[ "$preflight_done" == true ]] || preflight >/dev/null
+
+  if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
+    owned_container "$EGRESS_NAME" || { echo 'reconcile=FAIL: managed egress is missing or not owned' >&2; return 1; }
+    if ! container_running "$EGRESS_NAME"; then docker start "$EGRESS_NAME" >/dev/null; repaired=true; fi
+    wait_tailscale_ready || { echo 'reconcile=FAIL: managed egress did not become ready' >&2; return 1; }
+    pin_tailscale_proxy_ip
+  fi
+
+  while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
+    rebuild=false; table_present=false; identity_changed=false
+    group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1 && table_present=true
+    if [[ "$namespace" == container ]]; then
+      stored_id=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv")
+      stored_namespace=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-namespaces.tsv" 2>/dev/null || true)
+      current_id=$(docker inspect -f '{{.Id}}' "$container" 2>/dev/null || true)
+      current_namespace=$(namespace_identity "$namespace" "$container" 2>/dev/null || true)
+      if [[ -n "$stored_namespace" ]]; then
+        [[ "$stored_id" == "$current_id" && "$stored_namespace" == "$current_namespace" ]] || identity_changed=true
+      elif [[ "$stored_id" != "$current_id" || "$table_present" != true ]]; then
+        identity_changed=true
+      fi
+      if [[ "$identity_changed" == true && "$table_present" == true ]]; then
+        echo "reconcile=FAIL: replacement namespace already contains the project nftables table for source group $tag" >&2
+        return 1
+      fi
+      if [[ "$identity_changed" == true ]]; then
+        if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]] && source_on_proxy_network "$container"; then
+          docker network disconnect -f "$PROXY_NETWORK" "$container"
+        fi
+        refresh_source_baseline "$backup" "$tag" "$namespace" "$container"
+        rebuild=true
+      fi
+      if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]] && ! source_on_proxy_network "$container"; then
+        docker network connect --gw-priority -1 "$PROXY_NETWORK" "$container"
+        rebuild=true
+      fi
+    fi
+    [[ "$table_present" == true ]] || rebuild=true
+    container_running "$capture" && owned_container "$capture" || rebuild=true
+    if [[ "$MANAGED_DNS" == true ]]; then container_running "$dns" && owned_container "$dns" || rebuild=true; fi
+    if [[ "$rebuild" == true ]]; then
+      for name in "$capture" "$dns"; do
+        if docker inspect "$name" >/dev/null 2>&1; then
+          owned_container "$name" || { echo "reconcile=FAIL: sidecar name is not project-owned: $name" >&2; return 1; }
+          docker rm -f "$name" >/dev/null
+        fi
+      done
+      start_group "$tag" "$namespace" "$container" "$source_tag" "$capture" "$dns"
+      repaired=true
+    fi
+  done < <(groups_tsv)
+
+  write_manifest applied "$backup"
+  if ! verify_applied; then
+    capture_failure_diagnostics reconcile_verification_failed
+    echo 'reconcile=FAIL: targeted recovery did not pass verification; fail-closed resources were preserved' >&2
+    return 1
+  fi
+  if [[ "$repaired" == true ]]; then echo 'reconcile=RECOVERED'; else echo 'reconcile=IDENTITY_RECORDED'; fi
+}
+
+recover_runtime() {
+  if [[ $(manifest_status 2>/dev/null || true) != applied ]]; then
+    echo 'watchdog=NO_ACTION'
+    return 0
+  fi
+  if status_runtime >/dev/null 2>&1; then
+    echo 'watchdog=HEALTHY'
+    return 0
+  fi
+  if ! preflight >/dev/null 2>&1; then
+    echo 'watchdog=DEFERRED'
+    return 0
+  fi
+  if ! repair_applied_runtime true; then
+    echo 'watchdog=FAILED' >&2
+    return 1
+  fi
+  cancel_deadman
+  echo 'watchdog=RECOVERED'
+}
+
 status_runtime() {
-  local status=absent tag namespace container source_tag capture dns capture_state dns_state table_state ok=true
-  if [[ -f "$MANIFEST" ]]; then source "$MANIFEST"; status=$MANIFEST_STATUS; fi
+  local status=absent tag namespace container source_tag capture dns capture_state dns_state table_state identity_state stored_id current_id stored_namespace current_namespace ok=true
+  status=$(manifest_status 2>/dev/null || printf absent)
   echo "status=$status"
   echo "source_groups=$(groups_tsv | wc -l | tr -d ' ')"
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     container_running "$capture" && capture_state=running || capture_state=stopped
     if [[ "$MANAGED_DNS" == true ]]; then container_running "$dns" && dns_state=running || dns_state=stopped; else dns_state=not_applicable; fi
     group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1 && table_state=present || table_state=absent
+    identity_state=not_applicable
+    if [[ "$namespace" == container && "$status" == applied ]]; then
+      stored_id=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv" 2>/dev/null || true)
+      stored_namespace=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-namespaces.tsv" 2>/dev/null || true)
+      current_id=$(docker inspect -f '{{.Id}}' "$container" 2>/dev/null || true)
+      current_namespace=$(namespace_identity "$namespace" "$container" 2>/dev/null || true)
+      if [[ -z "$stored_namespace" ]]; then identity_state=unrecorded
+      elif [[ "$stored_id" == "$current_id" && "$stored_namespace" == "$current_namespace" ]]; then identity_state=matched
+      else identity_state=changed
+      fi
+    fi
     if [[ "$status" == applied ]]; then
       [[ "$capture_state" == running && "$table_state" == present ]] || ok=false
       [[ "$MANAGED_DNS" != true || "$dns_state" == running ]] || ok=false
+      [[ "$namespace" != container || "$identity_state" == matched ]] || ok=false
     fi
     echo "source.$tag.namespace=$namespace"
     echo "source.$tag.capture=$capture_state"
     echo "source.$tag.dns=$dns_state"
     echo "source.$tag.nftables=$table_state"
+    echo "source.$tag.namespace_identity=$identity_state"
   done < <(groups_tsv)
   if [[ "$status" == applied ]]; then
     require_manifest_match || ok=false
@@ -525,7 +689,16 @@ case "$command_name" in
   rollback) rollback_runtime false ;;
   status) status_runtime ;;
   verify) verify_applied; [[ "$cancel_deadman" == true ]] && { cancel_deadman; echo 'deadman=CANCELLED'; }; echo 'verify=PASS' ;;
+  recover) recover_runtime ;;
   reconcile)
-    if verify_applied; then echo 'reconcile=NO_CHANGE'; else rollback_runtime true; apply_runtime; echo 'reconcile=PASS'; fi
+    if verify_applied; then
+      echo 'reconcile=NO_CHANGE'
+    elif [[ $(manifest_status 2>/dev/null || true) == applied ]]; then
+      repair_applied_runtime
+    else
+      rollback_runtime true
+      apply_runtime
+      echo 'reconcile=PASS'
+    fi
     ;;
 esac
