@@ -117,6 +117,15 @@ test('the rollback deadman is armed before the first live runtime step', async (
   assert.ok(manifest >= 0 && deadman > manifest && runtime > deadman);
 });
 
+test('the rollback deadman receives the installed private Node runtime', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  const start = source.indexOf('arm_deadman_timer()');
+  const end = source.indexOf('rollback_command()', start);
+  const deadman = source.slice(start, end);
+  assert.match(deadman, /--setenv="VPN_ROUTER_NODE=\$node_bin"/);
+  assert.match(deadman, /"\$script_path" rollback/);
+});
+
 test('rollback verifies absence before reporting success', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const rollbackStart = source.indexOf('rollback_command()');

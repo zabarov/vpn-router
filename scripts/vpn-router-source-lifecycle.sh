@@ -141,6 +141,7 @@ cancel_deadman() {
 arm_deadman() {
   cancel_deadman
   systemd-run --quiet --unit "$DEADMAN_UNIT" --on-active "${1}s" \
+    --setenv="VPN_ROUTER_NODE=$node_bin" \
     /bin/bash "$script_dir/vpn-router-source-lifecycle.sh" rollback --config "$STORED_CONFIG" --deadman-call
 }
 

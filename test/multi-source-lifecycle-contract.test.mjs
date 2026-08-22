@@ -20,6 +20,12 @@ test('multi-source enable arms rollback before applying namespace state', () => 
   assert.match(apply, /rollback_runtime true/);
 });
 
+test('multi-source deadman receives the installed private Node runtime', () => {
+  const deadman = lifecycle.slice(lifecycle.indexOf('arm_deadman()'), lifecycle.indexOf('normalize_network_json()'));
+  assert.match(deadman, /--setenv="VPN_ROUTER_NODE=\$node_bin"/);
+  assert.match(deadman, /vpn-router-source-lifecycle[.]sh" rollback/);
+});
+
 test('source VPN containers are borrowed and never stopped or removed', () => {
   assert.doesNotMatch(lifecycle, /docker (?:rm|stop|restart)[^\n]*"\$container"/);
   assert.match(lifecycle, /docker network disconnect -f "\$PROXY_NETWORK" "\$container"/);

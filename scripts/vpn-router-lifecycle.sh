@@ -661,6 +661,7 @@ arm_deadman_timer() {
     --quiet \
     --unit "$DEADMAN_UNIT" \
     --on-active "${seconds}s" \
+    --setenv="VPN_ROUTER_NODE=$node_bin" \
     /bin/bash "$script_path" rollback --config "$STORED_CONFIG" --deadman-call
 }
 

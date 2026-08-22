@@ -37,6 +37,9 @@ All notable changes are documented here.
 - Require managed Tailscale readiness before removing the one-off enrollment
   key and again after credential-free recreation, preventing an unsuccessful
   enrollment from being silently replaced by an unauthenticated container.
+- Pass the installed private Node runtime explicitly to transient systemd
+  rollback units so a deadman does not depend on a distribution-wide `node`
+  command being present.
 - Record a sanitized second-provider Ubuntu 24.04 real-Amnezia server run with
   simultaneous AWG2/XRay discovery, managed-Tailscale enrollment, strict/direct
   separation, fail-closed outage recovery, reboot, namespace restart,

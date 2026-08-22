@@ -79,6 +79,12 @@ pre-alpha canary. It is not production-ready.
   The transaction rolled back before routing was accepted. The lifecycle now
   requires readiness before scrubbing and again after credential-free
   recreation; a regression contract and the repeated live enrollment pass.
+- A full-pool external canary exposed a packaging defect in the transient
+  rollback unit: the installed private Node runtime was not passed to the
+  deadman environment. Manual rollback completed before further mutation. Both
+  lifecycle implementations now pass the installed runtime explicitly; the
+  regression test and repeated live timer must pass before this canary is
+  accepted.
 
 All public evidence is sanitized. Hostnames, public IP addresses, client
 addresses, credentials, profiles, and raw operational logs remain private.
