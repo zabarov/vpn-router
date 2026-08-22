@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh VPN Router country and exact-domain routing data
+Documentation=https://github.com/zabarov/vpn-router
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=vpn-router-data-update.service
+
+[Install]
+WantedBy=timers.target

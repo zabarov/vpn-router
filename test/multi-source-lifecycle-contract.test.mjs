@@ -5,11 +5,22 @@ import { readFile } from 'node:fs/promises';
 const lifecycle = await readFile(new URL('../scripts/vpn-router-source-lifecycle.sh', import.meta.url), 'utf8');
 const dispatcher = await readFile(new URL('../scripts/vpn-router-lifecycle.sh', import.meta.url), 'utf8');
 
-test('schema 2 dispatches to the transactional multi-source lifecycle', () => {
+test('schema 2 and 3 dispatch to the transactional multi-source lifecycle', () => {
   assert.match(dispatcher, /CONFIG_SCHEMA_VERSION" == 2[.]0/);
+  assert.match(dispatcher, /CONFIG_SCHEMA_VERSION" == 3[.]0/);
   assert.match(dispatcher, /vpn-router-source-lifecycle[.]sh/);
   assert.match(lifecycle, /render-runtime-plan/);
   assert.match(lifecycle, /groups_tsv/);
+});
+
+test('schema 3 refreshes private data before apply and verifies freshness', () => {
+  assert.match(lifecycle, /readonly DATA_STATE="\$STATE_ROOT\/data\/state[.]json"/);
+  assert.match(lifecycle, /vpn-router-data[.]mjs" update/);
+  assert.match(lifecycle, /nft_args=.*render-nftables/);
+  assert.match(lifecycle, /nft_args[+]=\(--routing-data/);
+  assert.match(lifecycle, /verify=FAIL: routing data is unavailable or stale/);
+  assert.match(lifecycle, /vpn-router-data-update[.]timer/);
+  assert.match(lifecycle, /stop vpn-router-data-update[.]service/);
 });
 
 test('multi-source enable arms rollback before applying namespace state', () => {

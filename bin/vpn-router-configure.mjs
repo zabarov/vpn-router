@@ -23,6 +23,10 @@ const defaults = {
   egressInterface: 'wg-exit',
   healthcheckUrl: 'https://example.com/',
   domains: '.example',
+  countries: '',
+  exactDomains: '',
+  directDomains: '',
+  directCidrs: '',
   serviceName: 'vpn-router',
   nftablesTable: 'vpn_router',
   preset: null,
@@ -48,6 +52,10 @@ const optionMap = new Map([
   ['--egress-interface', 'egressInterface'],
   ['--healthcheck-url', 'healthcheckUrl'],
   ['--domains', 'domains'],
+  ['--countries', 'countries'],
+  ['--exact-domains', 'exactDomains'],
+  ['--direct-domains', 'directDomains'],
+  ['--direct-cidrs', 'directCidrs'],
   ['--service-name', 'serviceName'],
   ['--nftables-table', 'nftablesTable'],
   ['--preset', 'preset']
@@ -75,6 +83,10 @@ Options:
   --egress-interface <name>
   --healthcheck-url <https-url>
   --domains <.suffix,.suffix>
+  --countries <ISO-code,ISO-code>
+  --exact-domains <domain,domain>
+  --direct-domains <domain,domain>
+  --direct-cidrs <cidr,cidr>
   --service-name <name>
   --nftables-table <name>
   --non-interactive
@@ -157,8 +169,8 @@ export async function applyPreset(values, discover = discoverVpnSources) {
   if (values.nonInteractive && !values.provided.has('exitNode')) {
     throw new Error('The non-interactive amnezia-tailscale preset requires --exit-node.');
   }
-  if (values.nonInteractive && !values.provided.has('domains')) {
-    throw new Error('The non-interactive amnezia-tailscale preset requires --domains.');
+  if (values.nonInteractive && !['domains', 'countries', 'exactDomains'].some((field) => values.provided.has(field))) {
+    throw new Error('The non-interactive amnezia-tailscale preset requires at least one of --countries, --exact-domains, or --domains.');
   }
   if (!values.provided.has('exitNode')) values.exitNode = '';
   if (!values.provided.has('domains')) values.domains = '';
@@ -203,6 +215,9 @@ async function collectInteractive(values) {
     }
     values.healthcheckUrl = await ask(rl, 'Credential-free HTTPS healthcheck URL', values.healthcheckUrl);
     values.domains = await ask(rl, 'Strict domain suffixes, comma separated', values.domains);
+    values.countries = await ask(rl, 'Country codes routed through the strict egress, comma separated', values.countries);
+    values.exactDomains = await ask(rl, 'Exact domains routed through the strict egress, comma separated', values.exactDomains);
+    values.directDomains = await ask(rl, 'Exact domains that must always use the VPN server directly', values.directDomains);
     values.serviceName = await ask(rl, 'Service name', values.serviceName);
     values.nftablesTable = await ask(rl, 'Owned nftables table', values.nftablesTable);
   } finally {
@@ -227,7 +242,10 @@ async function collectPresetInteractive(values) {
       }
     }
     values.exitNode = await askRequired(rl, 'Tailscale exit node name or IP', values.exitNode);
-    values.domains = await askRequired(rl, 'Domain suffixes routed through Tailscale', values.domains);
+    values.countries = await ask(rl, 'Country codes routed through Tailscale, comma separated', values.countries || 'RU');
+    values.exactDomains = await ask(rl, 'Exact domains routed through Tailscale, comma separated', values.exactDomains);
+    values.domains = await ask(rl, 'Domain suffixes routed through Tailscale (best effort), comma separated', values.domains);
+    values.directDomains = await ask(rl, 'Exact domains that must always stay direct', values.directDomains);
   } finally {
     rl.close();
   }
@@ -304,17 +322,36 @@ export function buildConfig(values) {
     };
   }
 
+  const strictDestination = {
+    country_codes: commaList(values.countries).map((country) => country.toUpperCase()),
+    exact_domains: commaList(values.exactDomains),
+    domain_suffixes: commaList(values.domains),
+    ip_cidrs: []
+  };
+  const directDestination = {
+    exact_domains: commaList(values.directDomains),
+    ip_cidrs: commaList(values.directCidrs)
+  };
+  const hasDirectOverrides = directDestination.exact_domains.length + directDestination.ip_cidrs.length > 0;
+  const policies = [];
+  if (hasDirectOverrides) policies.push({ tag: 'always-direct', sources: sources.map((source) => source.tag), destination_sets: ['direct-overrides'], egress: 'direct', failure_mode: 'direct' });
+  policies.push(
+    { tag: 'strict-destinations', sources: sources.map((source) => source.tag), destination_sets: ['strict-destinations'], egress: 'strict-egress', failure_mode: 'block' },
+    { tag: 'default-direct', sources: sources.map((source) => source.tag), destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
+  );
   return {
-    schema_version: '2.0',
+    schema_version: '3.0',
+    routing_data: {
+      country_provider: { type: 'ripestat', refresh_interval: '24h', max_stale: '7d' },
+      domain_resolver: { refresh_interval: '5m', min_ttl: 60, max_ttl: 3600, max_stale: '24h' }
+    },
     sources,
     capture: { type: 'redirect', listen_port: 15001 },
     egresses: [strictEgress, { tag: 'direct', type: 'direct' }],
-    policies: [
-      { tag: 'strict-domains', sources: sources.map((source) => source.tag), destination_sets: ['strict-domains'], egress: 'strict-egress', failure_mode: 'block' },
-      { tag: 'default-direct', sources: sources.map((source) => source.tag), destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
-    ],
+    policies,
     destination_sets: {
-      'strict-domains': { domain_suffixes: commaList(values.domains) }
+      'strict-destinations': strictDestination,
+      ...(hasDirectOverrides ? { 'direct-overrides': directDestination } : {})
     },
     traffic_handling: { udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed' },
     resources: { nftables_table: values.nftablesTable, service_name: values.serviceName }

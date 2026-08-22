@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
-readonly DNS_IMAGE='vpn-router-dns:0.5.0-pre-alpha'
+readonly DNS_IMAGE='vpn-router-dns:0.6.0-alpha.1'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
@@ -69,7 +69,7 @@ config_path=$(cd -- "$(dirname -- "$config_path")" && pwd)/$(basename -- "$confi
 # Schema 2 uses the multi-source transactional engine. Schema 1 keeps the
 # established compatibility lifecycle and can be migrated explicitly.
 eval "$("$node_bin" "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path")"
-if [[ "$CONFIG_SCHEMA_VERSION" == 2.0 ]]; then
+if [[ "$CONFIG_SCHEMA_VERSION" == 2.0 || "$CONFIG_SCHEMA_VERSION" == 3.0 ]]; then
   multi_args=("$command_name" --config "$config_path")
   [[ -z "$rollback_after" ]] || multi_args+=(--rollback-after "$rollback_after")
   [[ "$cancel_deadman" == false ]] || multi_args+=(--cancel-deadman)

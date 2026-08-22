@@ -10,7 +10,8 @@ The core is provider-neutral:
 
 - source adapters expose either a Linux tunnel interface with explicit client
   scope or all outbound sockets of one proxy container;
-- destination sets select IPv4 addresses directly or through managed DNS;
+- destination sets select IPv4 addresses through country resources,
+  server-resolved exact domains, static CIDRs, or managed DNS observation;
 - a strict policy sends selected TCP connections to one egress adapter;
 - the default policy leaves all non-selected traffic on the existing VPN path;
 - lifecycle commands own only resources named by the project manifest.
@@ -44,7 +45,7 @@ network-namespace or interface reuse.
 
 Every `container_egress` declares `clients: {mode: all}` because XRay-style
 outbound sockets no longer preserve the original VPN client address. Schema
-version 1 remains readable and can be migrated into a separate file.
+versions 1 and 2 remain readable and can be migrated into a separate file.
 
 ## Egress adapters
 
@@ -89,7 +90,8 @@ preflight -> enable -> status/verify -> disable
 - `rollback` is the failure/recovery operation. It removes owned resources,
   verifies the saved network baseline, and records a rollback result.
 - `status` reports configured scope, lifecycle state, adapter health, owned
-  resources, and drift without printing credentials or private config.
+  resources, routing-data freshness, and drift without printing credentials or
+  private config. Overall data states are `READY`, `DEGRADED`, and `FAILED`.
 - `verify` checks the current manifest, source identity, selected egress,
   ordinary path, strict path, and ownership boundaries.
 
@@ -100,10 +102,12 @@ VPN implementation.
 
 ## Failure invariants
 
-- Selected traffic is blocked if capture, DNS selection, or strict egress is
+- Selected traffic is blocked if capture, required data, DNS selection, or strict egress is
   unavailable.
 - Non-selected traffic remains on the existing VPN path during a strict-path
   outage.
+- Invalid, empty, suspiciously shrunken, or temporarily unavailable provider
+  responses never replace a usable last-known-good set.
 - DNS-selected addresses persist until lifecycle cleanup. This prefers
   temporary over-routing of a stale/shared address to a direct leak caused by a
   longer-lived client DNS cache.
@@ -132,6 +136,7 @@ must prove:
 10. a live rollout with backup, server-side deadman rollback, stop conditions,
     and an operator-confirmed change window.
 
-IPv6, selected UDP, DoH/DoT, ECH, direct-IP classification, and shared-CDN
-precision remain outside the first production contract until they have their
-own implementation and evidence.
+IPv6 and selected UDP remain outside the first production contract. DoH/DoT
+and ECH remain outside guaranteed suffix classification, while country CIDRs,
+static CIDRs, and already resolved exact domains remain DNS-independent.
+Shared-CDN precision is explicitly not guaranteed.

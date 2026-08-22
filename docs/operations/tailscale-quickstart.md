@@ -58,7 +58,8 @@ sudo vpn-router setup
 ```
 
 The wizard discovers supported tunnel sources and XRay/V2Ray containers. It
-selects them together and asks only for the exit-node name and domain suffixes.
+selects them together and asks for the exit-node name, countries, exact
+domains, suffixes, and optional direct exceptions.
 For tunnel sources it starts with one discovered client `/32`; proxy-container
 sources necessarily cover all users of that container.
 
@@ -86,7 +87,8 @@ For AmneziaWG2 and XRay separately, verify:
 - a selected domain uses the Tailscale exit;
 - selected traffic is blocked if the exit is stopped;
 - ordinary traffic remains available;
-- DNS uses the system resolver, with browser Secure DNS/DoH disabled.
+- country and exact-domain routing still works with browser Secure DNS enabled;
+- suffix-only routing works through the managed system DNS path.
 
 If all checks pass:
 
@@ -125,12 +127,16 @@ sudo vpn-router service-enable
 
 ```sh
 sudo vpn-router status
+sudo vpn-router data-status
+sudo vpn-router diagnose obr.site
 sudo vpn-router disable
 sudo vpn-router enable --rollback-after 600
 ```
 
 ## Current limits
 
-The guaranteed pre-alpha mode is IPv4/TCP with managed system DNS. Selected UDP
-and QUIC are rejected. IPv6, DoH/DoT, ECH, private resolvers, direct-IP
-connections, and shared-CDN effects are outside the strict guarantee.
+The alpha candidate is IPv4/TCP-only. Selected UDP and QUIC are rejected.
+Country, static-CIDR, and pre-resolved exact-domain routing do not depend on
+client DNS. IPv6 is unsupported; DoH/DoT, ECH, and private resolvers make
+arbitrary suffix matching best effort. Shared-CDN addresses can over-route
+neighboring names.

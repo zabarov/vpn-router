@@ -5,14 +5,24 @@ overwrite a file unless `--force` is explicit. The published JSON Schema is
 [`schema/config.schema.json`](../../schema/config.schema.json); the semantic
 validator enforces additional safety relationships.
 
-## Schema version 2
+## Schema version 3
 
 A configuration contains one or more sources, exactly one strict egress plus
-one direct egress, one strict policy, and one default-direct policy. Both
-policies must cover the same source set.
+one direct egress, one strict policy, an optional higher-priority direct
+override, and one default-direct policy. All policies cover the same source set.
 
 ```yaml
-schema_version: "2.0"
+schema_version: "3.0"
+routing_data:
+  country_provider:
+    type: ripestat
+    refresh_interval: 24h
+    max_stale: 7d
+  domain_resolver:
+    refresh_interval: 5m
+    min_ttl: 60
+    max_ttl: 3600
+    max_stale: 24h
 sources:
   - tag: tunnel-in
     type: tunnel_interface
@@ -108,32 +118,39 @@ by VPN Router.
 
 ## Policies and destination sets
 
-The strict policy uses `failure_mode: block`; the default policy uses the
-direct egress. `sources` may list all or an explicit subset, but the current
-MVP requires the strict and default policies to cover the same set.
+Policies are evaluated top to bottom: `always-direct`, strict routing, then
+default direct. The strict policy uses `failure_mode: block`; it never falls
+back directly. All policies must cover the same sources.
 
-Domain suffixes must be lower-case ASCII with a leading dot. Use punycode for
-internationalized domains. Optional IPv4 CIDRs may be combined with suffixes.
-No country or provider list is built in.
+Country codes are upper-case ISO alpha-2 values. Country prefixes come from
+RIPEstat's Country Resource List and describe registry association rather than
+guaranteed physical location. Exact domains are resolved by the server and
+refreshed without client DNS. Domain suffixes must be lower-case ASCII with a
+leading dot; use punycode for internationalized names.
 
 ```yaml
 destination_sets:
-  selected-services:
-    domain_suffixes: [.service.example, .corp.example]
-    ip_cidrs: [192.0.2.0/24]
+  regional:
+    country_codes: [RU]
+    exact_domains: [obr.site, 2ip.io]
+    domain_suffixes: [.ru, .xn--p1ai, .su]
+    ip_cidrs: []
+  direct-overrides:
+    exact_domains: []
+    ip_cidrs: [198.51.100.0/24]
 ```
 
 ## Managed DNS limitations
 
-Plain TCP/UDP port 53 is redirected to dnsmasq. DoH, DoT, browser Secure DNS,
-private resolvers, ECH, direct-IP connections, and addresses cached before
-enable can bypass suffix observation. Shared CDN addresses can cause another
-hostname on the same IP to follow the strict path. These cases require operator
-testing and are not claimed as guaranteed.
+Plain TCP/UDP port 53 is redirected to dnsmasq for suffix observation. DoH,
+DoT, browser Secure DNS, private resolvers, and ECH can bypass that observation.
+They do not bypass country CIDRs, static CIDRs, or already resolved exact-domain
+addresses. Shared CDN addresses can cause another hostname on the same IP to
+follow the same route.
 
 ## Migration
 
-Schema version 1 remains readable. Create a separate version-2 file without
+Schema versions 1 and 2 remain readable. Create a separate version-3 file without
 changing the original:
 
 ```sh

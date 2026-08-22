@@ -1,24 +1,25 @@
 # Production readiness
 
-The project is currently pre-alpha. Schema-2 now has disposable, reference-host,
-independent clean-Linux, and second-provider real-Amnezia server lifecycle
-evidence. Production status still requires external-client acceptance on that
-second provider plus the stable-release security and artifact gates below.
+The project is a `0.6.0-alpha.1` candidate, not production-ready. Schema-3
+laboratory and guarded reference-host acceptance pass. A second independent
+host passes installation, data refresh, downgrade, restoration, and removal,
+but it has not completed a live two-source VPN routing canary.
 
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
-| Configuration | Multi-source schema, migration, negative validation | Passed in unit and schema tests |
+| Configuration | Schema 3, schema 1/2 migration, negative validation | Passed locally; candidate CI pending |
+| Routing data | RIPEstat, exact-domain resolver, last-known-good, stale and shrink guards | Passed in deterministic tests and on two independent Ubuntu hosts |
 | Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 passes both container-source and real host-interface paths; Linux-interface strict egress remains fixture-only |
-| Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Passed on the reference host and an independent Ubuntu host |
+| Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Passed for simultaneous AWG2 and XRay sources on the guarded reference host |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
 | Whole pool | Explicit test subnet with no interface-only wildcard | Passed in the disposable redirect lab |
 | Failure safety | Capture, DNS, SOCKS and egress outages fail closed | Tunnel and proxy-container labs pass; managed-Tailscale XRay live outages pass on two providers; second-provider external tunnel-client outage smoke remains |
 | Restart lifecycle | Host reboot, Docker restart and source recreation | Reference-host and second-provider real-Amnezia reboot/reconciliation pass; independent same-ID watchdog and new-ID reconcile also pass |
-| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Clean-host packaging plus active independent-host upgrade, downgrade, verification, uninstall and exact cleanup pass |
-| Observability | Scope, adapter health, drift and counters in secret-free status | Scope, adapter health and drift implemented; counter summary pending |
+| Upgrade lifecycle | Previous configuration to candidate and downgrade proof | Active reference-host downgrade and restoration pass; independent-host install, downgrade, restoration, and uninstall pass |
+| Observability | READY/DEGRADED/FAILED, diagnosis, scope, adapter health, drift and counters | Data status, JSON status, diagnosis, source health, egress state, and per-source selector counters pass |
 | Security | Root-only state, immutable images, secret scan and dependency review | Partial |
-| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 2 and watchdog recovery; clean-reader validation pending |
-| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Combined XRay and external AWG2 reference canaries pass; second-provider server lifecycle passes, but its external-client smoke remains |
+| Documentation | Install, configure, operate, recover and troubleshoot from a clean host | Updated for schema 3; independent clean-reader validation remains a beta gate |
+| Live rollout | AWG2 and XRay canaries with backup and deadman rollback | Guarded simultaneous schema-3 canary passes on one reference host; second live VPN host remains |
 
 ## Release levels
 

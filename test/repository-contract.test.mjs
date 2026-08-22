@@ -21,6 +21,16 @@ test('release version and ignored private workspace stay consistent', async () =
   assert.match(gitignore, /^\*\.vpn$/m);
 });
 
+test('release packaging uses a clean tracked-file allowlist and rejects private environment files', async () => {
+  const script = await text('../scripts/build-release.sh');
+  assert.match(script, /git archive --format=tar/);
+  assert.match(script, /git diff --quiet/);
+  assert.match(script, /git ls-files --others --exclude-standard/);
+  assert.match(script, /source\/\*/);
+  assert.match(script, /[.]env[.][*]/);
+  assert.doesNotMatch(script, /tar .*\.[/]/);
+});
+
 test('external runtime images are immutable', async () => {
   const [deploymentText, linuxDeploymentText, namespaceLabText, redirectLabText, lifecycle, isolatedRunner, dnsDockerfile] = await Promise.all([
     text('../deploy/compose.amneziawg2.yaml'),

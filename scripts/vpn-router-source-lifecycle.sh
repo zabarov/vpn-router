@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly SING_BOX_IMAGE='ghcr.io/sagernet/sing-box@sha256:da0e2331395c9025a85fa58892772b4cdbe5f2e530e93defeec3968175d06c6d'
 readonly TAILSCALE_IMAGE='tailscale/tailscale:stable@sha256:cdf5612ded5be1344f1a704b8c5e53496db97376bb533e5e15f141e48bf60cc0'
-readonly DNS_IMAGE='vpn-router-dns:0.5.0-pre-alpha'
+readonly DNS_IMAGE='vpn-router-dns:0.6.0-alpha.1'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
@@ -90,6 +90,7 @@ readonly MANIFEST="$RUNTIME_DIR/multi-source-manifest.env"
 readonly STORED_CONFIG="$RUNTIME_DIR/multi-source-config.yaml"
 readonly STORED_PLAN="$RUNTIME_DIR/multi-source-plan.json"
 readonly EGRESS_STATE="$STATE_ROOT/egress-tailscale"
+readonly DATA_STATE="$STATE_ROOT/data/state.json"
 readonly EGRESS_PROXY_IP_FILE="$RUNTIME_DIR/tailscale-proxy-ip"
 readonly DEADMAN_UNIT="${SERVICE_NAME}-deadman"
 
@@ -249,13 +250,28 @@ require_manifest_match() {
   [[ "$MANIFEST_PLAN_SHA256" == "$(sha256sum "$STORED_PLAN" | awk '{print $1}')" ]]
 }
 
+refresh_routing_data() {
+  local destination=$1
+  if [[ $(json_value config_schema_version) == 3.0 ]]; then
+    "$node_bin" "$repo_dir/bin/vpn-router-data.mjs" update --config "$config_path" --state "$destination" >/dev/null
+  fi
+}
+
+verify_routing_data() {
+  [[ $(json_value config_schema_version) != 3.0 ]] || \
+    "$node_bin" "$repo_dir/bin/vpn-router-data.mjs" status --config "$config_path" --state "$DATA_STATE" >/dev/null
+}
+
 render_artifacts() {
-  local tag namespace container source_tag capture dns dir
+  local data_state=${1-} tag namespace container source_tag capture dns dir
+  local -a nft_args
   rm -rf "$ARTIFACT_DIR"
   mkdir -p "$ARTIFACT_DIR"
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     dir="$ARTIFACT_DIR/$tag"; mkdir -p "$dir"; chmod 700 "$dir"
-    "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$config_path" --source "$source_tag" >"$dir/router.nft"
+    nft_args=(render-nftables --config "$config_path" --source "$source_tag")
+    [[ -z "$data_state" ]] || nft_args+=(--routing-data "$data_state")
+    "$node_bin" "$repo_dir/bin/vpn-router.mjs" "${nft_args[@]}" >"$dir/router.nft"
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$config_path" --source "$source_tag" >"$dir/sing-box.json"
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$config_path" >"$dir/dnsmasq.conf"
     group_exec "$namespace" "$container" nft -c -f - <"$dir/router.nft"
@@ -269,7 +285,7 @@ preflight() {
   local command tag type namespace container interface source_tag capture dns managed_active=false
   for command in docker nsenter nft ip curl systemctl systemd-run sha256sum; do command -v "$command" >/dev/null; done
   docker info >/dev/null
-  [[ $(json_value config_schema_version) == 2.0 ]] || { echo 'preflight=FAIL: multi-source lifecycle requires schema 2.0' >&2; return 1; }
+  [[ $(json_value config_schema_version) =~ ^(2[.]0|3[.]0)$ ]] || { echo 'preflight=FAIL: multi-source lifecycle requires schema 2.0 or 3.0' >&2; return 1; }
   if require_manifest_match >/dev/null 2>&1; then
     # shellcheck disable=SC1090
     source "$MANIFEST"
@@ -318,7 +334,15 @@ preflight() {
   fi
   mkdir -p "$RUNTIME_DIR" "$ARTIFACT_DIR"; chmod 700 "$STATE_ROOT" "$RUNTIME_DIR" "$ARTIFACT_DIR"
   docker image inspect "$DNS_IMAGE" >/dev/null 2>&1 || docker build -q -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
-  render_artifacts
+  local preflight_data=''
+  if [[ $(json_value config_schema_version) == 3.0 ]]; then
+    preflight_data=$(mktemp /tmp/vpn-router-data.XXXXXX)
+    rm -f "$preflight_data"
+    if [[ -f "$DATA_STATE" ]]; then cp "$DATA_STATE" "$preflight_data"; chmod 600 "$preflight_data"; fi
+    if ! refresh_routing_data "$preflight_data"; then rm -f "$preflight_data"; return 1; fi
+  fi
+  render_artifacts "$preflight_data"
+  [[ -z "$preflight_data" ]] || rm -f "$preflight_data"
   if [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]]; then
     while IFS=$'\t' read -r tag namespace container source_tag capture dns; do healthcheck_group "$namespace" "$container"; done < <(groups_tsv)
   fi
@@ -467,6 +491,7 @@ verify_applied() {
   # shellcheck disable=SC1090
   source "$MANIFEST"
   [[ "$MANIFEST_STATUS" == applied ]] || { echo "verify=FAIL: manifest status is $MANIFEST_STATUS" >&2; return 1; }
+  verify_routing_data || { echo 'verify=FAIL: routing data is unavailable or stale' >&2; return 1; }
   [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]] || { container_running "$EGRESS_NAME" && owned_container "$EGRESS_NAME"; } || { echo 'verify=FAIL: managed egress is not running or not owned' >&2; return 1; }
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     if [[ "$namespace" == container ]]; then
@@ -500,7 +525,15 @@ owned_absent() {
 
 rollback_runtime() {
   local allow_source_change=${1:-false} tag namespace container source_tag capture dns stored_id current_id backup ok=true
-  [[ -f "$MANIFEST" ]] || { cancel_deadman; echo 'rollback=ALREADY_ABSENT'; return 0; }
+  [[ -f "$MANIFEST" ]] || {
+    cancel_deadman
+    if [[ "$command_name" == disable ]]; then
+      systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
+      systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
+    fi
+    echo 'rollback=ALREADY_ABSENT'
+    return 0
+  }
   require_manifest_match || { echo 'rollback=FAIL: manifest or config mismatch' >&2; return 1; }
   # shellcheck disable=SC1090
   source "$MANIFEST"; backup=$MANIFEST_BACKUP_DIR
@@ -531,6 +564,10 @@ rollback_runtime() {
   local status=rolled_back; [[ "$command_name" == disable ]] && status=disabled
   write_manifest "$status" "$backup"
   [[ "$deadman_call" == true ]] || cancel_deadman
+  if [[ "$command_name" == disable ]]; then
+    systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
+    systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
+  fi
   [[ "$command_name" == disable ]] && echo 'disable=PASS' || echo 'rollback=PASS'
 }
 
@@ -543,6 +580,10 @@ apply_runtime() {
   fi
   preflight >/dev/null
   mkdir -p "$RUNTIME_DIR/backups" "$RUNTIME_DIR/rollback-verification"; chmod 700 "$STATE_ROOT" "$RUNTIME_DIR" "$RUNTIME_DIR/backups" "$RUNTIME_DIR/rollback-verification"
+  if [[ $(json_value config_schema_version) == 3.0 ]]; then
+    refresh_routing_data "$DATA_STATE"
+    render_artifacts "$DATA_STATE"
+  fi
   cp "$config_path" "$STORED_CONFIG"; cp "$plan_tmp" "$STORED_PLAN"; chmod 600 "$STORED_CONFIG" "$STORED_PLAN"
   backup=$(capture_baseline)
   write_manifest applying "$backup"
@@ -655,6 +696,11 @@ status_runtime() {
   status=$(manifest_status 2>/dev/null || printf absent)
   echo "status=$status"
   echo "source_groups=$(groups_tsv | wc -l | tr -d ' ')"
+  if [[ $(json_value config_schema_version) == 3.0 ]]; then
+    "$node_bin" "$repo_dir/bin/vpn-router-data.mjs" status --config "$config_path" --state "$DATA_STATE" | sed 's/^/data./' || ok=false
+  else
+    echo 'data_status=not_applicable'
+  fi
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     container_running "$capture" && capture_state=running || capture_state=stopped
     if [[ "$MANAGED_DNS" == true ]]; then container_running "$dns" && dns_state=running || dns_state=stopped; else dns_state=not_applicable; fi

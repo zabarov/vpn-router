@@ -63,7 +63,7 @@ export function normalizeConfig(config) {
 }
 
 export function migrateConfig(config) {
-  if (config?.schema_version === '2.0') return structuredClone(config);
-  if (config?.schema_version !== '1.0') throw new Error('only schema_version 1.0 can be migrated');
-  return normalizeConfig(config);
+  if (config?.schema_version === '3.0') return structuredClone(config);
+  if (!['1.0', '2.0'].includes(config?.schema_version)) throw new Error('only schema_version 1.0 or 2.0 can be migrated');
+  return { ...normalizeConfig(config), schema_version: '3.0' };
 }

@@ -1,4 +1,15 @@
-schema_version: "2.0"
+schema_version: "3.0"
+
+routing_data:
+  country_provider:
+    type: ripestat
+    refresh_interval: 24h
+    max_stale: 7d
+  domain_resolver:
+    refresh_interval: 5m
+    min_ttl: 60
+    max_ttl: 3600
+    max_stale: 24h
 
 sources:
   - tag: amnezia-in
@@ -32,10 +43,17 @@ egresses:
     healthcheck_url: https://example.com/
 
 policies:
-  - tag: selected-services
+  # Rules are evaluated from top to bottom.
+  - tag: always-direct
     sources: [amnezia-in, xray-in]
     destination_sets:
-      - selected-services
+      - direct-overrides
+    egress: direct
+    failure_mode: direct
+  - tag: regional
+    sources: [amnezia-in, xray-in]
+    destination_sets:
+      - regional
     egress: strict-egress
     failure_mode: block
   - tag: default-direct
@@ -46,10 +64,21 @@ policies:
     failure_mode: direct
 
 destination_sets:
-  selected-services:
+  regional:
+    country_codes:
+      - RU
+    exact_domains:
+      - obr.site
+      - 2ip.io
     domain_suffixes:
-      - .service.example
-      - .corp.example
+      - .ru
+      - .xn--p1ai
+      - .su
+    ip_cidrs: []
+  direct-overrides:
+    exact_domains: []
+    ip_cidrs:
+      - 198.51.100.0/24
 
 traffic_handling:
   udp_quic: reject

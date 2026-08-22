@@ -24,15 +24,24 @@ function legacyConfig() {
   };
 }
 
-test('normalizes schema 1 adapters and policy references into schema 2', () => {
+test('migrates schema 1 adapters and policy references into schema 3', () => {
   const migrated = migrateConfig(legacyConfig());
-  assert.equal(migrated.schema_version, '2.0');
+  assert.equal(migrated.schema_version, '3.0');
   assert.deepEqual(migrated.sources[0], {
     tag: 'vpn-in', type: 'tunnel_interface', namespace: 'container', container_name: 'vpn-source', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.0.0/24' }
   });
   assert.deepEqual(migrated.policies.map((policy) => policy.sources), [['vpn-in'], ['vpn-in']]);
   assert.deepEqual(validateConfig(migrated), { valid: true, errors: [] });
   assert.deepEqual(normalizeConfig(migrated), migrated);
+});
+
+test('migrates schema 2 to schema 3 without changing its routing behavior', () => {
+  const schema2 = normalizeConfig(legacyConfig());
+  const migrated = migrateConfig(schema2);
+  assert.equal(schema2.schema_version, '2.0');
+  assert.equal(migrated.schema_version, '3.0');
+  assert.deepEqual({ ...migrated, schema_version: '2.0' }, schema2);
+  assert.deepEqual(validateConfig(migrated), { valid: true, errors: [] });
 });
 
 test('migrate-config writes a new private file and refuses overwrite', async () => {
@@ -42,7 +51,7 @@ test('migrate-config writes a new private file and refuses overwrite', async () 
   await writeFile(input, `${JSON.stringify(legacyConfig())}\n`, { mode: 0o600 });
   await execFileAsync(process.execPath, ['bin/vpn-router.mjs', 'migrate-config', '--input', input, '--output', output], { cwd: new URL('..', import.meta.url) });
   assert.equal((await stat(output)).mode & 0o777, 0o600);
-  assert.equal(parse(await readFile(output, 'utf8')).schema_version, '2.0');
+  assert.equal(parse(await readFile(output, 'utf8')).schema_version, '3.0');
   await assert.rejects(
     execFileAsync(process.execPath, ['bin/vpn-router.mjs', 'migrate-config', '--input', input, '--output', output], { cwd: new URL('..', import.meta.url) }),
     /EEXIST/

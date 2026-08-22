@@ -32,9 +32,10 @@ sudo vpn-router setup
 ```
 
 `discover` is read-only. `setup` selects every supported detected Amnezia
-tunnel and XRay/V2Ray container, then asks for the shared Tailscale exit node
-and domain suffixes. The generated `/etc/vpn-router/router.yaml` is mode `0600`
-and routing remains disabled.
+tunnel and XRay/V2Ray container, then asks for the shared Tailscale exit and
+routing choices. Countries use RIPEstat data, exact domains are resolved on the
+server, and suffixes use managed DNS observation. The generated
+`/etc/vpn-router/router.yaml` is mode `0600` and routing remains disabled.
 
 For external SOCKS5 or Linux-interface egress, use the advanced wizard:
 
@@ -67,7 +68,8 @@ sudo vpn-router enable --rollback-after 600
 ```
 
 `enable` captures a root-only baseline and arms an independent server-side
-rollback before applying any source. Test every source, one ordinary domain,
+rollback before applying any source. It requires valid initial country and
+exact-domain data before changing routing. Test every source, one ordinary domain,
 one selected domain, DNS, and strict-egress failure. Only then cancel the timer:
 
 ```sh
@@ -78,12 +80,15 @@ sudo vpn-router verify --cancel-deadman
 
 ```sh
 sudo vpn-router status
+sudo vpn-router status --json
+sudo vpn-router data-status
+sudo vpn-router diagnose obr.site
 sudo vpn-router disable
 sudo vpn-router enable --rollback-after 600
 ```
 
-`disable` removes only VPN Router resources and preserves source VPNs and the
-persisted Tailscale enrollment. It is idempotent.
+`disable` removes only VPN Router resources, stops the data updater, and
+preserves source VPNs and the persisted Tailscale enrollment. It is idempotent.
 
 ## Container recreation
 
@@ -117,7 +122,9 @@ sudo vpn-router disable
 ```
 
 `disable` remains authoritative: the recovery timer never enables a disabled
-runtime. If a source VPN is temporarily stopped, recovery is deferred until
+runtime. The data timer refreshes exact domains every five minutes and country
+data according to its configured interval, using an atomic nftables update in
+every active source namespace. If a source VPN is temporarily stopped, recovery is deferred until
 preflight succeeds. `service-disable` stops the recovery timer before it stops
 the routing service.
 

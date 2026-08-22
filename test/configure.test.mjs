@@ -30,11 +30,11 @@ test('non-interactive wizard creates a private validated Tailscale canary config
     assert.equal(mode, 0o600);
     const config = parse(await readFile(output, 'utf8'));
     assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
-    assert.equal(config.schema_version, '2.0');
+    assert.equal(config.schema_version, '3.0');
     assert.deepEqual(config.sources[0].clients.addresses, ['10.9.0.2/32', '10.9.0.3/32']);
     assert.equal(config.egresses[0].proxy_server, 'regional-router-egress');
     assert.equal(config.egresses[0].auth_key_env, 'VPN_ROUTER_TAILSCALE_AUTH_KEY');
-    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.example']);
+    assert.deepEqual(config.destination_sets['strict-destinations'].domain_suffixes, ['.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -130,7 +130,7 @@ test('amnezia-tailscale preset requires explicit real topology in non-interactiv
     assert.equal(config.sources[0].container_name, 'amnezia-awg');
     assert.deepEqual(config.sources[0].clients.addresses, ['10.8.1.9/32']);
     assert.equal(config.egresses[0].type, 'tailscale_socks');
-    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.service.example']);
+    assert.deepEqual(config.destination_sets['strict-destinations'].domain_suffixes, ['.service.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -143,7 +143,7 @@ test('non-interactive Amnezia preset requires an operator-supplied domain policy
     '--client-addresses', '10.8.1.9/32', '--exit-node', 'exit.example.ts.net'
   ], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /requires --domains/);
+  assert.match(result.stderr, /requires at least one of --countries, --exact-domains, or --domains/);
 });
 
 test('amnezia-tailscale preset auto-selects one discovered source and one canary', async () => {
@@ -186,7 +186,7 @@ test('all-clients shortcut uses the subnet discovered from Amnezia', async () =>
   assert.equal(configured.clientSubnet, '10.77.0.0/24');
 });
 
-test('preset selects all discovered tunnel and proxy sources in one schema 2 configuration', async () => {
+test('preset selects all discovered tunnel and proxy sources in one schema 3 configuration', async () => {
   const values = parseArgs(['--preset', 'amnezia-tailscale', '--all-clients', '--exit-node', 'exit.example.ts.net', '--domains', '.service.example']);
   const configured = await applyPreset(values, async () => [{
     source_type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg', interface: 'awg0',
@@ -195,7 +195,7 @@ test('preset selects all discovered tunnel and proxy sources in one schema 2 con
     source_type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' }
   }]);
   const config = buildConfig(configured);
-  assert.equal(config.schema_version, '2.0');
+  assert.equal(config.schema_version, '3.0');
   assert.deepEqual(config.sources.map((source) => source.type), ['tunnel_interface', 'container_egress']);
   assert.deepEqual(config.policies[0].sources, ['tunnel-1', 'proxy-2']);
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
@@ -231,7 +231,7 @@ test('setup shortcut creates an Amnezia and Tailscale config through the guarded
     assert.equal(result.status, 0, result.stderr);
     const config = parse(await readFile(output, 'utf8'));
     assert.equal(config.egresses[0].exit_node, 'exit.example.ts.net');
-    assert.deepEqual(config.destination_sets['strict-domains'].domain_suffixes, ['.service.example', '.corp.example']);
+    assert.deepEqual(config.destination_sets['strict-destinations'].domain_suffixes, ['.service.example', '.corp.example']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -243,6 +243,21 @@ test('interactive beginner preset asks only user-owned routing choices', () => {
   const presetWizard = configureSource.slice(start, end);
   assert.match(presetWizard, /Tailscale exit node name or IP/);
   assert.match(presetWizard, /Domain suffixes routed through Tailscale/);
-  assert.match(presetWizard, /askRequired\(rl, 'Domain suffixes routed through Tailscale'/);
+  assert.match(presetWizard, /Country codes routed through Tailscale/);
+  assert.match(presetWizard, /Exact domains that must always stay direct/);
+  assert.match(presetWizard, /Country codes routed through Tailscale/);
   assert.doesNotMatch(presetWizard, /VPN source type|Owned nftables table|Service name/);
+});
+
+test('wizard creates country, exact-domain, and higher-priority direct overrides', () => {
+  const values = parseArgs([
+    '--countries', 'ru', '--exact-domains', 'obr.site,2ip.io',
+    '--direct-domains', 'direct.example', '--direct-cidrs', '198.51.100.0/24'
+  ]);
+  const config = buildConfig(values);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  assert.deepEqual(config.destination_sets['strict-destinations'].country_codes, ['RU']);
+  assert.deepEqual(config.destination_sets['strict-destinations'].exact_domains, ['obr.site', '2ip.io']);
+  assert.equal(config.policies[0].tag, 'always-direct');
+  assert.deepEqual(config.destination_sets['direct-overrides'].ip_cidrs, ['198.51.100.0/24']);
 });

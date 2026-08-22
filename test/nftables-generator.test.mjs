@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateNftablesConfig } from '../src/nftables-generator.mjs';
+import { generateNftablesConfig, generateNftablesDataUpdate } from '../src/nftables-generator.mjs';
 
 const config = {
   schema_version: '1.0',
@@ -54,4 +54,53 @@ test('generates fail-closed OUTPUT capture for a proxy container without recaptu
   assert.match(generated, /ip daddr @set_regional_services_dns meta l4proto udp counter reject/);
   assert.match(generated, /ip daddr @set_regional_services_dns meta l4proto tcp counter reject with tcp reset/);
   assert.doesNotMatch(generated, /iifname|ip saddr|source_xray_clients/);
+});
+
+test('renders hybrid server data once and gives direct overrides first priority', () => {
+  const hybrid = {
+    ...structuredClone(config),
+    schema_version: '3.0',
+    routing_data: {
+      country_provider: { type: 'ripestat', refresh_interval: '24h', max_stale: '7d' },
+      domain_resolver: { refresh_interval: '5m', min_ttl: 60, max_ttl: 3600, max_stale: '24h' }
+    },
+    policies: [
+      { tag: 'always-direct', sources: ['amnezia-in'], destination_sets: ['direct-overrides'], egress: 'direct', failure_mode: 'direct' },
+      { tag: 'selected', sources: ['amnezia-in'], destination_sets: ['regional-services'], egress: 'regional-exit', failure_mode: 'block' },
+      { tag: 'default', sources: ['amnezia-in'], destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
+    ],
+    sources: [{ tag: 'amnezia-in', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] } }],
+    destination_sets: {
+      'regional-services': { country_codes: ['RU'], exact_domains: ['obr.site'], domain_suffixes: ['.ru'], ip_cidrs: [] },
+      'direct-overrides': { exact_domains: ['direct.example'], ip_cidrs: ['198.51.100.0/24'] }
+    }
+  };
+  const routingData = {
+    destination_sets: {
+      'regional-services': { country_cidrs: ['5.8.0.0/13'], exact_ips: ['188.40.167.81'] },
+      'direct-overrides': { country_cidrs: [], exact_ips: ['198.51.100.9'] }
+    }
+  };
+  const generated = generateNftablesConfig(hybrid, { routingData });
+  assert.match(generated, /set set_regional_services_country .*5\.8\.0\.0\/13/);
+  assert.match(generated, /set set_regional_services_exact .*188\.40\.167\.81/);
+  assert.match(generated, /set set_direct_overrides_exact .*198\.51\.100\.9/);
+  const directRule = generated.indexOf('ip daddr @set_direct_overrides_exact counter return');
+  const strictRule = generated.indexOf('ip daddr @set_regional_services_country meta l4proto tcp');
+  assert.ok(directRule >= 0 && directRule < strictRule);
+  assert.equal((generated.match(/@set_regional_services_country meta l4proto tcp counter redirect/g) ?? []).length, 1);
+  const update = generateNftablesDataUpdate(hybrid, routingData);
+  assert.match(update, /^flush set inet vpn_router set_regional_services_country/m);
+  assert.match(update, /add element inet vpn_router set_direct_overrides_exact \{ 198\.51\.100\.9 \}/);
+  assert.equal((update.match(/flush set inet vpn_router set_regional_services_country/g) ?? []).length, 1);
+});
+
+test('refuses dynamic selectors without verified routing data', () => {
+  const hybrid = structuredClone(config);
+  hybrid.schema_version = '3.0';
+  hybrid.routing_data = { country_provider: { type: 'ripestat', refresh_interval: '24h', max_stale: '7d' } };
+  hybrid.sources = [{ tag: 'amnezia-in', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] } }];
+  hybrid.policies = config.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['amnezia-in'] }));
+  hybrid.destination_sets['regional-services'] = { country_codes: ['RU'], ip_cidrs: [], domain_suffixes: [] };
+  assert.throws(() => generateNftablesConfig(hybrid), /missing country prefixes/);
 });

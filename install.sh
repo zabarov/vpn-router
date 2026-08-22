@@ -217,7 +217,7 @@ write_command_wrapper() {
 write_systemd_units() {
   local node_path=$1 unit_name unit_path unit_temp
   [[ "$systemd_enabled" == true ]] || return 0
-  for unit_name in vpn-router.service vpn-router-watchdog.service vpn-router-watchdog.timer; do
+  for unit_name in vpn-router.service vpn-router-watchdog.service vpn-router-watchdog.timer vpn-router-data-update.service vpn-router-data-update.timer; do
     unit_path=$(physical "/etc/systemd/system/$unit_name")
     unit_temp="$unit_path.$$.tmp"
     mkdir -p "$(dirname -- "$unit_path")"
@@ -333,6 +333,8 @@ uninstall_release() {
   [[ -n "$service_name" && -f "$(physical "/var/lib/$service_name/runtime/manifest.env")" ]] && active_manifest=true
   if [[ "$root" == / && "$systemd_enabled" == true ]]; then
     systemctl disable --now vpn-router-watchdog.timer >/dev/null 2>&1 || true
+    systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
+    systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
   fi
   if [[ "$root" == / && "$systemd_enabled" == true && -f /etc/systemd/system/vpn-router.service ]]; then
     if systemctl is-active --quiet vpn-router.service; then
@@ -354,6 +356,8 @@ uninstall_release() {
     "$(physical '/etc/systemd/system/vpn-router.service')" \
     "$(physical '/etc/systemd/system/vpn-router-watchdog.service')" \
     "$(physical '/etc/systemd/system/vpn-router-watchdog.timer')"
+  rm -f "$(physical '/etc/systemd/system/vpn-router-data-update.service')" \
+    "$(physical '/etc/systemd/system/vpn-router-data-update.timer')"
   rm -rf "$prefix_path"
   if [[ "$purge" == true ]]; then
     [[ -z "$service_name" ]] || rm -rf "$(physical "/var/lib/$service_name")"

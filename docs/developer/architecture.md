@@ -10,8 +10,10 @@ proxy containers -------------------------- OUTPUT ---/          |
 unselected traffic --------------------------------------------------------> existing direct path
 ```
 
-The core has no country-specific behavior. A routing profile is ordinary user
-data containing domain suffixes and optional IPv4 CIDRs.
+The core has no hard-coded country behavior. A routing profile contains ISO
+country codes, exact domains, suffixes, and optional IPv4 CIDRs. RIPEstat
+country resources and server DNS answers are normalized into root-only,
+integrity-checked last-known-good state.
 
 ## Source adapters
 
@@ -43,10 +45,11 @@ SOCKS listener through a loopback-only published port.
 
 ## Selection and loop prevention
 
-dnsmasq redirects plain DNS and inserts selected IPv4 answers into a
-pre-created nftables set before returning the answer. Static CIDRs use a
-separate set. The entries remain until disable or a fresh apply, preferring
-temporary over-routing to a later direct leak from a longer-lived client cache.
+Country CIDRs, exact-domain addresses, static CIDRs, and DNS-observed suffix
+addresses use separate nftables sets. A timer refreshes server data and swaps
+dynamic set contents atomically. Failed or suspicious refreshes preserve fresh
+last-known-good data. dnsmasq inserts plain-DNS suffix answers before returning
+the answer.
 
 Tunnel sources use nftables `PREROUTING`. Proxy sources use `OUTPUT` and exclude:
 
@@ -71,7 +74,7 @@ unselected traffic never enters the capture process.
 stores exact source container IDs, arms a systemd rollback deadman, and applies
 all sources transactionally. Failure in one source rolls back the whole apply.
 
-`disable` is the master switch. It removes only the manifest-owned nftables
+`disable` is the master switch. It stops data updates and removes only the manifest-owned nftables
 tables, capture/DNS/egress containers, project networks, and attachments. It
 preserves source VPNs and Tailscale state. Each container namespace has a
 recorded kernel identity in addition to its Docker ID. `reconcile` detects a
@@ -84,10 +87,11 @@ periodically but never re-enables a disabled manifest.
 
 ## Protocol boundary
 
-Version `0.5.0-pre-alpha` is IPv4/TCP-only. Proxy namespaces reject IPv6;
+Version `0.6.0-alpha.1` is IPv4/TCP-only. Proxy namespaces reject IPv6;
 tunnel preflight refuses a global IPv6 address because a safe client-scoped
-IPv6 model is not implemented. DoH/DoT, ECH, direct-IP connections, private
-resolvers, and shared CDN addresses remain explicit limitations.
+IPv6 model is not implemented. DoH/DoT and ECH remain limitations for arbitrary
+suffix observation, but do not bypass country/static CIDRs or already resolved
+exact domains. Shared CDN addresses remain an explicit over-routing limitation.
 
 ## Upstream references
 
@@ -96,3 +100,4 @@ resolvers, and shared CDN addresses remain explicit limitations.
 - [sing-box dial fields and routing mark](https://sing-box.sagernet.org/configuration/shared/dial/)
 - [sing-box redirect inbound](https://sing-box.sagernet.org/configuration/inbound/redirect/)
 - [dnsmasq nftset options](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html)
+- [RIPEstat Country Resource List](https://stat.ripe.net/docs/data-api/api-endpoints/country-resource-list)

@@ -1,4 +1,8 @@
-schema_version: "2.0"
+schema_version: "3.0"
+
+routing_data:
+  country_provider: { type: ripestat, refresh_interval: 24h, max_stale: 7d }
+  domain_resolver: { refresh_interval: 5m, min_ttl: 60, max_ttl: 3600, max_stale: 24h }
 
 sources:
   - tag: lab-source
@@ -23,6 +27,11 @@ egresses:
     healthcheck_url: https://example.com/
 
 policies:
+  - tag: direct-override
+    sources: [lab-source]
+    destination_sets: [direct-target]
+    egress: direct
+    failure_mode: direct
   - tag: strict
     sources: [lab-source]
     destination_sets: [strict-target]
@@ -36,7 +45,13 @@ policies:
 
 destination_sets:
   strict-target:
+    country_codes: [RU]
+    exact_domains: [strict.test]
     domain_suffixes: [.test]
+    ip_cidrs: []
+  direct-target:
+    exact_domains: []
+    ip_cidrs: [198.18.20.30/32]
 
 traffic_handling:
   udp_quic: reject

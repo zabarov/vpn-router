@@ -244,3 +244,47 @@ test('rejects duplicate destination entries', () => {
   config.destination_sets['regional-services'].ip_cidrs.push('203.0.113.0/24');
   assert.match(validateConfig(config).errors.join('\n'), /ip_cidrs must not contain duplicates/);
 });
+
+test('accepts schema 3 country, exact-domain, and ordered direct overrides', () => {
+  const legacy = validConfig();
+  const config = {
+    ...legacy,
+    schema_version: '3.0',
+    routing_data: {
+      country_provider: { type: 'ripestat', refresh_interval: '24h', max_stale: '7d' },
+      domain_resolver: { refresh_interval: '5m', min_ttl: 60, max_ttl: 3600, max_stale: '24h' }
+    },
+    sources: [{ tag: 'vpn-in', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.1.0/24' } }],
+    destination_sets: {
+      regional: { country_codes: ['RU'], exact_domains: ['obr.site'], domain_suffixes: ['.ru'], ip_cidrs: ['203.0.113.0/24'] },
+      'direct-overrides': { exact_domains: ['direct.example'] }
+    },
+    policies: [
+      { tag: 'always-direct', sources: ['vpn-in'], destination_sets: ['direct-overrides'], egress: 'direct', failure_mode: 'direct' },
+      { tag: 'regional', sources: ['vpn-in'], destination_sets: ['regional'], egress: 'regional-exit', failure_mode: 'block' },
+      { tag: 'default', sources: ['vpn-in'], destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
+    ]
+  };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+});
+
+test('schema 3 rejects missing data providers and unsafe policy order', () => {
+  const legacy = validConfig();
+  const config = {
+    ...legacy,
+    schema_version: '3.0',
+    sources: [{ tag: 'vpn-in', type: 'tunnel_interface', namespace: 'host', interface: 'wg0', clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] } }],
+    destination_sets: { regional: { country_codes: ['ru'], exact_domains: ['.invalid.example'] } },
+    policies: [
+      { tag: 'regional', sources: ['vpn-in'], destination_sets: ['regional'], egress: 'regional-exit', failure_mode: 'block' },
+      { tag: 'always-direct', sources: ['vpn-in'], destination_sets: ['regional'], egress: 'direct', failure_mode: 'direct' },
+      { tag: 'default', sources: ['vpn-in'], destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
+    ]
+  };
+  const errors = validateConfig(config).errors.join('\n');
+  assert.match(errors, /invalid ISO country_codes/);
+  assert.match(errors, /invalid exact_domains/);
+  assert.match(errors, /require routing_data.country_provider/);
+  assert.match(errors, /require routing_data.domain_resolver/);
+  assert.match(errors, /direct-override policy must precede/);
+});

@@ -13,6 +13,7 @@ export VPN_ROUTER_LAB_NFTABLES_CONFIG="$artifact_dir/vpn-router.nft"
 export VPN_ROUTER_LAB_SING_BOX_CONFIG="$artifact_dir/sing-box.json"
 export VPN_ROUTER_LAB_DNSMASQ_CONFIG="$artifact_dir/dnsmasq.conf"
 subnet_nftables_config="$artifact_dir/vpn-router-subnet.nft"
+routing_data="$artifact_dir/routing-data.json"
 
 cleanup() {
   cleanup_status=$?
@@ -31,10 +32,22 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
+node --input-type=module - "$repo_dir" "$lab_dir/config.yaml" "$routing_data" <<'EOF'
+import { readFile } from 'node:fs/promises';
+import { parse } from 'yaml';
+const [repo, configPath, statePath] = process.argv.slice(2);
+const { buildRoutingDataState, writeRoutingDataState } = await import(`${repo}/src/routing-data.mjs`);
+const config = parse(await readFile(configPath, 'utf8'));
+const state = await buildRoutingDataState(config, {
+  fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ data: { resources: { ipv4: ['198.18.20.0/24'] } } }) }),
+  resolve4: async () => [{ address: '198.18.20.20', ttl: 300 }]
+});
+await writeRoutingDataState(statePath, state);
+EOF
+node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.yaml" --routing-data "$routing_data" >"$VPN_ROUTER_LAB_NFTABLES_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$lab_dir/config.yaml" --source lab-source >"$VPN_ROUTER_LAB_SING_BOX_CONFIG"
 node "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$lab_dir/config.yaml" >"$VPN_ROUTER_LAB_DNSMASQ_CONFIG"
-node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.subnet.yaml" >"$subnet_nftables_config"
+node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$lab_dir/config.subnet.yaml" --routing-data "$routing_data" >"$subnet_nftables_config"
 # The 0700 parent limits host visibility. Read-only
 # bind mounts need 0644 because the test containers deliberately drop DAC override.
 chmod 644 "$artifact_dir"/*
@@ -93,6 +106,7 @@ sidecar_id=$(docker compose -f "$compose_file" ps -q sidecar)
 assert_response canary-client 198.18.20.30 direct-target
 assert_response selected-client 198.18.20.30 direct-target
 assert_response control-client 198.18.20.20 strict-target
+assert_response canary-client 198.18.20.20 strict-target
 
 docker compose -f "$compose_file" stop socks-egress >/dev/null
 resolve_strict
@@ -150,4 +164,4 @@ if docker network inspect "${project_name}_lab" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "PASS: managed DNS selected the first connection, two selected clients required TCP redirect and SOCKS, explicit subnet scope included the full test pool, staged scope restoration excluded the control client, a stopped SOCKS name failed closed and recovered without restarting sing-box, both outages preserved direct traffic, selected addresses persisted after managed DNS stopped, and cleanup completed."
+echo "PASS: country data selected a direct-IP request without client DNS, the direct override beat the country match, managed DNS selected suffix traffic, two selected clients required TCP redirect and SOCKS, explicit subnet scope included the full test pool, staged scope restoration excluded the control client, SOCKS and capture outages failed closed, and cleanup completed."

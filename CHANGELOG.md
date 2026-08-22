@@ -2,6 +2,32 @@
 
 All notable changes are documented here.
 
+## 0.6.0-alpha.1 - Unreleased
+
+- Add schema version 3 with ordered `always-direct`, strict, and default-direct
+  policies across all configured tunnel and proxy-container sources.
+- Add RIPEstat country resources, server-resolved exact domains, static CIDRs,
+  and managed-DNS suffix observation as independent destination selectors.
+- Normalize and collapse IPv4 prefixes, reject empty or suspiciously shrunken
+  provider responses, and preserve integrity-checked root-only last-known-good
+  data with explicit `READY`, `DEGRADED`, and `FAILED` states.
+- Atomically refresh dynamic nftables sets in every active source namespace and
+  compensate already updated namespaces if a later update fails.
+- Stop both the routing-data timer and any in-flight update service before
+  disable, uninstall, or version changes, preventing lifecycle lock races.
+- Add `data-update`, `data-status`, `diagnose`, JSON status, full verification,
+  and project-owned systemd data-update units.
+- Extend the setup wizard with country, exact-domain, and direct-override
+  choices while keeping Amnezia installation and Tailscale enrollment separate.
+- Prove country selection without client DNS, exact-domain state independent of
+  browser cache, direct-override priority, multi-client isolation, and
+  fail-closed outage behavior in automated tests and the disposable kernel lab.
+- Validate a guarded live schema-3 canary across simultaneous AmneziaWG2 and
+  XRay sources, strict-egress outages, reconciliation, active downgrade and
+  candidate restoration without changing the source VPN containers.
+- Add a reproducible tracked-file release builder that refuses dirty trees and
+  excludes private environment and `source/` material by construction.
+
 ## 0.5.0-pre-alpha - Unreleased
 
 - Added opt-in periodic recovery for container stop/start and recreation. The

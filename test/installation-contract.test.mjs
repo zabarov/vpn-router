@@ -11,6 +11,9 @@ const watchdogUnit = await readFile(new URL('../deploy/systemd/vpn-router-watchd
 const watchdogTimer = await readFile(new URL('../deploy/systemd/vpn-router-watchdog.timer', import.meta.url), 'utf8');
 const lifecycle = await readFile(new URL('../scripts/vpn-router-lifecycle.sh', import.meta.url), 'utf8');
 const sourceLifecycle = await readFile(new URL('../scripts/vpn-router-source-lifecycle.sh', import.meta.url), 'utf8');
+const dataUpdate = await readFile(new URL('../scripts/vpn-router-data-update.sh', import.meta.url), 'utf8');
+const dataUpdateUnit = await readFile(new URL('../deploy/systemd/vpn-router-data-update.service', import.meta.url), 'utf8');
+const dataUpdateTimer = await readFile(new URL('../deploy/systemd/vpn-router-data-update.timer', import.meta.url), 'utf8');
 
 test('installer uses immutable release directories and a verified private Node runtime', () => {
   assert.match(install, /NODE_VERSION='24[.]18[.]0'/);
@@ -48,11 +51,24 @@ test('safe uninstall disables an active runtime and preserves state unless purge
 });
 
 test('installed command exposes configuration, lifecycle, service, and routing switch operations', () => {
-  for (const name of ['discover', 'setup', 'configure', 'validate', 'doctor', 'preflight', 'enable', 'disable', 'status', 'verify', 'rollback', 'reconcile', 'service-enable', 'service-disable', 'service-status']) {
+  for (const name of ['discover', 'setup', 'configure', 'validate', 'doctor', 'preflight', 'enable', 'disable', 'status', 'verify', 'rollback', 'reconcile', 'data-update', 'data-status', 'diagnose', 'service-enable', 'service-disable', 'service-status']) {
     assert.match(command, new RegExp(name.replace('-', '[-]')));
   }
   assert.match(command, /default_config=.*\/etc\/vpn-router\/router[.]yaml/);
   assert.match(install, /next=vpn-router setup/);
+});
+
+test('routing data updater is private, transactional, and systemd-managed', () => {
+  assert.match(dataUpdate, /flock -n/);
+  assert.match(dataUpdate, /render-data-update/);
+  assert.match(dataUpdate, /previous data was restored/);
+  assert.match(dataUpdate, /install -m 600/);
+  assert.match(dataUpdateUnit, /Type=oneshot/);
+  assert.match(dataUpdateUnit, /vpn-router-data-update[.]sh/);
+  assert.match(dataUpdateTimer, /OnUnitActiveSec=5min/);
+  assert.match(install, /vpn-router-data-update[.]service vpn-router-data-update[.]timer/);
+  assert.match(command, /enable --now vpn-router-data-update[.]timer/);
+  assert.match(command, /stop vpn-router-data-update[.]service/);
 });
 
 test('systemd boot reconciliation is explicit, bounded, and fail-closed', () => {

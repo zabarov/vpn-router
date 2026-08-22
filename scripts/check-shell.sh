@@ -5,6 +5,7 @@ bash -n \
   install.sh \
   scripts/run-isolated-amneziawg2-client.sh \
   scripts/vpn-router-command.sh \
+  scripts/vpn-router-data-update.sh \
   scripts/vpn-router-service.sh \
   scripts/vpn-router-watchdog.sh \
   scripts/vpn-router-source-lifecycle.sh \
@@ -23,6 +24,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     install.sh \
     scripts/run-isolated-amneziawg2-client.sh \
     scripts/vpn-router-command.sh \
+    scripts/vpn-router-data-update.sh \
     scripts/vpn-router-service.sh \
     scripts/vpn-router-watchdog.sh \
     scripts/vpn-router-source-lifecycle.sh \

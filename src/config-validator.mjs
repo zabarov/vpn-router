@@ -9,9 +9,12 @@ const networkAddressPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,252}$/;
 const nftablesTablePattern = /^[a-z][a-z0-9_]{2,31}$/;
 const serviceNamePattern = /^[a-z][a-z0-9-]{2,63}$/;
 
-const rootFields = new Set(['schema_version', 'sources', 'capture', 'egresses', 'policies', 'destination_sets', 'traffic_handling', 'resources']);
+const rootFields = new Set(['schema_version', 'routing_data', 'sources', 'capture', 'egresses', 'policies', 'destination_sets', 'traffic_handling', 'resources']);
 const captureFields = new Set(['type', 'listen_port']);
-const destinationSetFields = new Set(['ip_cidrs', 'domain_suffixes']);
+const destinationSetFields = new Set(['ip_cidrs', 'country_codes', 'exact_domains', 'domain_suffixes']);
+const routingDataFields = new Set(['country_provider', 'domain_resolver']);
+const countryProviderFields = new Set(['type', 'refresh_interval', 'max_stale']);
+const domainResolverFields = new Set(['refresh_interval', 'min_ttl', 'max_ttl', 'max_stale']);
 const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet', 'client_scope']);
 const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet', 'client_scope']);
 const tunnelSourceFields = new Set(['tag', 'type', 'namespace', 'container_name', 'interface', 'clients']);
@@ -134,6 +137,21 @@ function validDomainSuffix(value) {
   return value.slice(1).split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 }
 
+function validExactDomain(value) {
+  if (typeof value !== 'string' || value.startsWith('.') || value.length > 253) return false;
+  return value.split('.').length > 1 && value.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
+function validDuration(value) {
+  return typeof value === 'string' && /^[1-9][0-9]*(?:m|h|d)$/.test(value);
+}
+
+function durationMinutes(value) {
+  const match = /^([1-9][0-9]*)(m|h|d)$/.exec(value ?? '');
+  if (!match) return null;
+  return Number(match[1]) * { m: 1, h: 60, d: 1440 }[match[2]];
+}
+
 function validHttpsUrl(value) {
   if (typeof value !== 'string' || /[\s\u0000-\u001f\u007f]/u.test(value)) return false;
   try {
@@ -148,7 +166,7 @@ export function validateConfig(input) {
   const errors = [];
   if (!isObject(input)) return { valid: false, errors: ['configuration must be a YAML object'] };
   rejectUnknownKeys(input, rootFields, 'configuration', errors);
-  if (!['1.0', '2.0'].includes(input.schema_version)) errors.push('schema_version must be "1.0" or "2.0"');
+  if (!['1.0', '2.0', '3.0'].includes(input.schema_version)) errors.push('schema_version must be "1.0", "2.0", or "3.0"');
   if (input.schema_version === '1.0') {
     for (const source of input.sources ?? []) {
       if (!isObject(source)) continue;
@@ -161,7 +179,7 @@ export function validateConfig(input) {
   }
   const config = normalizeConfig(input);
   if (!isObject(config)) return { valid: false, errors: ['configuration must be a YAML object'] };
-  if (config.schema_version !== '2.0') return { valid: false, errors };
+  if (!['2.0', '3.0'].includes(config.schema_version)) return { valid: false, errors };
 
   let requiredListsAreUsable = true;
   for (const key of ['sources', 'egresses', 'policies']) {
@@ -172,7 +190,41 @@ export function validateConfig(input) {
   }
   if (!requiredListsAreUsable) return { valid: false, errors };
 
-  if (config.policies.length !== 2) errors.push('the IPv4/TCP MVP requires exactly one strict policy and one default-direct policy');
+  if (config.schema_version === '2.0' && config.policies.length !== 2) errors.push('schema 2 requires exactly one strict policy and one default-direct policy');
+  if (config.schema_version === '3.0' && (config.policies.length < 2 || config.policies.length > 3)) errors.push('schema 3 requires one strict policy, one default-direct policy, and at most one direct-override policy');
+
+  const routingData = config.routing_data;
+  if (routingData !== undefined) {
+    if (!isObject(routingData)) {
+      errors.push('routing_data must be an object');
+    } else {
+      rejectUnknownKeys(routingData, routingDataFields, 'routing_data', errors);
+      if (routingData.country_provider !== undefined) {
+        const provider = routingData.country_provider;
+        if (!isObject(provider)) errors.push('routing_data.country_provider must be an object');
+        else {
+          rejectUnknownKeys(provider, countryProviderFields, 'routing_data.country_provider', errors);
+          if (provider.type !== 'ripestat') errors.push('routing_data.country_provider.type must be ripestat');
+          if (!validDuration(provider.refresh_interval)) errors.push('routing_data.country_provider.refresh_interval must be a duration such as 24h');
+          if (!validDuration(provider.max_stale)) errors.push('routing_data.country_provider.max_stale must be a duration such as 7d');
+          if (durationMinutes(provider.refresh_interval) !== null && durationMinutes(provider.max_stale) !== null && durationMinutes(provider.max_stale) < durationMinutes(provider.refresh_interval)) errors.push('routing_data.country_provider.max_stale cannot be shorter than refresh_interval');
+        }
+      }
+      if (routingData.domain_resolver !== undefined) {
+        const resolver = routingData.domain_resolver;
+        if (!isObject(resolver)) errors.push('routing_data.domain_resolver must be an object');
+        else {
+          rejectUnknownKeys(resolver, domainResolverFields, 'routing_data.domain_resolver', errors);
+          if (!validDuration(resolver.refresh_interval)) errors.push('routing_data.domain_resolver.refresh_interval must be a duration such as 5m');
+          if (!Number.isInteger(resolver.min_ttl) || resolver.min_ttl < 30 || resolver.min_ttl > 86400) errors.push('routing_data.domain_resolver.min_ttl must be an integer between 30 and 86400');
+          if (!Number.isInteger(resolver.max_ttl) || resolver.max_ttl < 60 || resolver.max_ttl > 604800) errors.push('routing_data.domain_resolver.max_ttl must be an integer between 60 and 604800');
+          if (Number.isInteger(resolver.min_ttl) && Number.isInteger(resolver.max_ttl) && resolver.min_ttl > resolver.max_ttl) errors.push('routing_data.domain_resolver.min_ttl cannot exceed max_ttl');
+          if (!validDuration(resolver.max_stale)) errors.push('routing_data.domain_resolver.max_stale must be a duration such as 24h');
+          if (durationMinutes(resolver.refresh_interval) !== null && durationMinutes(resolver.max_stale) !== null && durationMinutes(resolver.max_stale) < durationMinutes(resolver.refresh_interval)) errors.push('routing_data.domain_resolver.max_stale cannot be shorter than refresh_interval');
+        }
+      }
+    }
+  }
 
   if (!isObject(config.capture) || config.capture.type !== 'redirect' || !Number.isInteger(config.capture.listen_port) || config.capture.listen_port < 1024 || config.capture.listen_port > 65535) {
     errors.push('capture must declare redirect with a non-privileged listen_port');
@@ -190,16 +242,29 @@ export function validateConfig(input) {
       }
       rejectUnknownKeys(destinationSet, destinationSetFields, `destination set ${name}`, errors);
       const cidrs = destinationSet.ip_cidrs ?? [];
+      const countries = destinationSet.country_codes ?? [];
+      const domains = destinationSet.exact_domains ?? [];
       const suffixes = destinationSet.domain_suffixes ?? [];
-      if ((!Array.isArray(cidrs) || cidrs.length === 0) && (!Array.isArray(suffixes) || suffixes.length === 0)) {
-        errors.push(`destination set ${name} requires ip_cidrs or domain_suffixes`);
+      if ([cidrs, countries, domains, suffixes].every((items) => !Array.isArray(items) || items.length === 0)) {
+        errors.push(`destination set ${name} requires at least one non-empty selector`);
       }
       if (!Array.isArray(cidrs) || cidrs.some((cidr) => !validIpv4Cidr(cidr))) errors.push(`destination set ${name} has an invalid IPv4 ip_cidrs entry`);
+      if (!Array.isArray(countries) || countries.some((country) => typeof country !== 'string' || !/^[A-Z]{2}$/.test(country))) errors.push(`destination set ${name} has an invalid ISO country_codes entry`);
+      if (!Array.isArray(domains) || domains.some((domain) => !validExactDomain(domain))) errors.push(`destination set ${name} has an invalid exact_domains entry`);
       if (!Array.isArray(suffixes) || suffixes.some((suffix) => !validDomainSuffix(suffix))) errors.push(`destination set ${name} has an invalid domain_suffixes entry`);
       rejectDuplicates(cidrs, `destination set ${name} ip_cidrs`, errors);
+      rejectDuplicates(countries, `destination set ${name} country_codes`, errors);
+      rejectDuplicates(domains, `destination set ${name} exact_domains`, errors);
       rejectDuplicates(suffixes, `destination set ${name} domain_suffixes`, errors);
     }
   }
+
+  const destinationValues = Object.values(config.destination_sets ?? {}).filter(isObject);
+  const needsCountryData = destinationValues.some((destination) => (destination.country_codes ?? []).length > 0);
+  const needsDomainData = destinationValues.some((destination) => (destination.exact_domains ?? []).length > 0);
+  if ((needsCountryData || needsDomainData) && config.schema_version !== '3.0') errors.push('country_codes and exact_domains require schema_version 3.0');
+  if (needsCountryData && !isObject(routingData?.country_provider)) errors.push('country_codes require routing_data.country_provider');
+  if (needsDomainData && !isObject(routingData?.domain_resolver)) errors.push('exact_domains require routing_data.domain_resolver');
 
   const sourceTags = uniqueTags(config.sources, 'source', errors);
   const egressTags = uniqueTags(config.egresses, 'egress', errors);
@@ -287,13 +352,24 @@ export function validateConfig(input) {
     const egress = config.egresses.find((candidate) => candidate.tag === policy.egress);
     if (policy.failure_mode === 'block' && egress?.type === 'direct') errors.push(`strict policy ${policy.tag ?? '<unknown>'} cannot use direct egress`);
     if (policy.destination_sets?.includes('default') && policy.destination_sets.length !== 1) errors.push(`policy ${policy.tag ?? '<unknown>'} cannot combine default with another destination set`);
-    if (policy.failure_mode === 'direct' && !policy.destination_sets?.includes('default')) errors.push(`non-default policy ${policy.tag ?? '<unknown>'} cannot use failure_mode direct in the MVP`);
+    if (policy.failure_mode === 'direct' && !policy.destination_sets?.includes('default')) {
+      if (config.schema_version !== '3.0') errors.push(`non-default policy ${policy.tag ?? '<unknown>'} cannot use failure_mode direct before schema 3`);
+      if (egress?.type !== 'direct') errors.push(`direct-override policy ${policy.tag ?? '<unknown>'} must use the direct egress`);
+      for (const setName of policy.destination_sets ?? []) {
+        const destination = config.destination_sets?.[setName];
+        if ((destination?.country_codes ?? []).length > 0 || (destination?.domain_suffixes ?? []).length > 0) {
+          errors.push(`direct-override policy ${policy.tag ?? '<unknown>'} supports only ip_cidrs and exact_domains`);
+        }
+      }
+    }
   }
 
   const strictPolicies = config.policies.filter((policy) => isObject(policy) && policy.failure_mode === 'block');
   const defaultPolicies = config.policies.filter((policy) => isObject(policy) && policy.destination_sets?.length === 1 && policy.destination_sets[0] === 'default');
+  const directOverridePolicies = config.policies.filter((policy) => isObject(policy) && policy.failure_mode === 'direct' && !policy.destination_sets?.includes('default'));
   if (strictPolicies.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one strict policy');
   if (defaultPolicies.length !== 1) errors.push('the IPv4/TCP MVP requires exactly one default policy');
+  if (directOverridePolicies.length > 1) errors.push('schema 3 supports at most one direct-override policy');
 
   const strictPolicy = strictPolicies[0];
   if (strictPolicy) {
@@ -312,6 +388,13 @@ export function validateConfig(input) {
     const defaultSources = [...policySources(defaultPolicy, config)].sort();
     if (JSON.stringify(strictSources) !== JSON.stringify(defaultSources)) errors.push('strict and default policies must reference the same sources');
   }
+  if (directOverridePolicies[0] && strictPolicy) {
+    const directSources = [...policySources(directOverridePolicies[0], config)].sort();
+    const strictSources = [...policySources(strictPolicy, config)].sort();
+    if (JSON.stringify(directSources) !== JSON.stringify(strictSources)) errors.push('direct-override and strict policies must reference the same sources');
+  }
+  if (config.schema_version === '3.0' && defaultPolicy && config.policies.at(-1) !== defaultPolicy) errors.push('the default-direct policy must be last');
+  if (directOverridePolicies[0] && strictPolicy && config.policies.indexOf(directOverridePolicies[0]) > config.policies.indexOf(strictPolicy)) errors.push('the direct-override policy must precede the strict policy');
   const activeStrictEgress = strictEgresses[0];
   if (activeStrictEgress?.type === 'linux_interface') {
     for (const source of config.sources.filter((candidate) => candidate.type === 'tunnel_interface' && candidate.namespace === 'host')) {

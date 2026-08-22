@@ -16,6 +16,14 @@ function dnsSetName(tag) {
   return `${setName(tag)}_dns`;
 }
 
+function countrySetName(tag) {
+  return `${setName(tag)}_country`;
+}
+
+function exactSetName(tag) {
+  return `${setName(tag)}_exact`;
+}
+
 function namespaceKey(source) {
   const namespace = sourceNamespace(source);
   return namespace.kind === 'host' ? 'host' : `container:${namespace.container_name}`;
@@ -37,6 +45,8 @@ function destinationNftSets(config, policy) {
     const destination = config.destination_sets[name];
     const result = [];
     if ((destination.ip_cidrs ?? []).length > 0) result.push(staticSetName(name));
+    if ((destination.country_codes ?? []).length > 0) result.push(countrySetName(name));
+    if ((destination.exact_domains ?? []).length > 0) result.push(exactSetName(name));
     if ((destination.domain_suffixes ?? []).length > 0) result.push(dnsSetName(name));
     return result;
   });
@@ -46,7 +56,7 @@ function tunnelSelector(source, destinationSet) {
   return `iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} ip daddr @${destinationSet}`;
 }
 
-export function generateNftablesConfig(input, { sourceTag } = {}) {
+export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
   const validation = validateConfig(input);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
   const config = normalizeConfig(input);
@@ -54,7 +64,9 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
   const sourceTags = new Set(sources.map((source) => source.tag));
   const strictPolicies = config.policies.filter((policy) => policy.failure_mode === 'block' &&
     policySources(policy, config).some((tag) => sourceTags.has(tag)));
-  const destinationSets = strictPolicies.flatMap((policy) => policy.destination_sets)
+  const directPolicies = config.policies.filter((policy) => policy.failure_mode === 'direct' && !policy.destination_sets.includes('default') &&
+    policySources(policy, config).some((tag) => sourceTags.has(tag)));
+  const destinationSets = [...directPolicies, ...strictPolicies].flatMap((policy) => policy.destination_sets)
     .filter((name) => name !== 'default')
     .filter((name, index, all) => all.indexOf(name) === index);
 
@@ -65,8 +77,20 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
   }
   for (const name of destinationSets) {
     const cidrs = config.destination_sets[name].ip_cidrs ?? [];
+    const countries = config.destination_sets[name].country_codes ?? [];
+    const exactDomains = config.destination_sets[name].exact_domains ?? [];
     const suffixes = config.destination_sets[name].domain_suffixes ?? [];
     if (cidrs.length > 0) lines.push(`  set ${staticSetName(name)} { type ipv4_addr; flags interval; elements = { ${cidrs.join(', ')} } }`);
+    if (countries.length > 0) {
+      const elements = routingData?.destination_sets?.[name]?.country_cidrs;
+      if (!Array.isArray(elements) || elements.length === 0) throw new Error(`Routing data is missing country prefixes for destination set: ${name}`);
+      lines.push(`  set ${countrySetName(name)} { type ipv4_addr; flags interval; elements = { ${elements.join(', ')} } }`);
+    }
+    if (exactDomains.length > 0) {
+      const elements = routingData?.destination_sets?.[name]?.exact_ips;
+      if (!Array.isArray(elements) || elements.length === 0) throw new Error(`Routing data is missing exact-domain addresses for destination set: ${name}`);
+      lines.push(`  set ${exactSetName(name)} { type ipv4_addr; flags interval; elements = { ${elements.join(', ')} } }`);
+    }
     if (suffixes.length > 0) lines.push(`  set ${dnsSetName(name)} { type ipv4_addr; flags interval; }`);
   }
 
@@ -75,10 +99,16 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
   if (tunnelSources.length > 0 && outputSources.length > 0) throw new Error('A container namespace cannot mix tunnel and container-egress source modes');
 
   if (tunnelSources.length > 0) {
-    const selectors = [];
+    const directSelectors = [];
+    const strictSelectors = [];
+    for (const policy of directPolicies) {
+      for (const source of tunnelSources.filter((candidate) => policySources(policy, config).includes(candidate.tag))) {
+        for (const nftSet of destinationNftSets(config, policy)) directSelectors.push({ source, selector: tunnelSelector(source, nftSet) });
+      }
+    }
     for (const policy of strictPolicies) {
       for (const source of tunnelSources.filter((candidate) => policySources(policy, config).includes(candidate.tag))) {
-        for (const nftSet of destinationNftSets(config, policy)) selectors.push({ source, selector: tunnelSelector(source, nftSet) });
+        for (const nftSet of destinationNftSets(config, policy)) strictSelectors.push({ source, selector: tunnelSelector(source, nftSet) });
       }
     }
     lines.push('  chain capture_redirect {');
@@ -89,20 +119,25 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
         lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} tcp dport 53 counter redirect to :5353`);
       }
     }
-    for (const { selector } of selectors) lines.push(`    ${selector} meta l4proto tcp counter redirect to :${config.capture.listen_port}`);
+    for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
+    for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto tcp counter redirect to :${config.capture.listen_port}`);
     lines.push('  }');
     lines.push('  chain prerouting_guard {');
     lines.push('    type filter hook prerouting priority mangle; policy accept;');
-    for (const { selector } of selectors) lines.push(`    ${selector} meta l4proto udp counter reject`);
+    for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
+    for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto udp counter reject`);
     lines.push('  }');
     lines.push('  chain forward_guard {');
     lines.push('    type filter hook forward priority filter; policy accept;');
-    for (const { selector } of selectors) lines.push(`    ${selector} meta l4proto tcp counter reject with tcp reset`);
+    for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
+    for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto tcp counter reject with tcp reset`);
     lines.push('  }');
   } else {
     const source = outputSources[0];
     const policies = strictPolicies.filter((policy) => policySources(policy, config).includes(source.tag));
     const nftSets = policies.flatMap((policy) => destinationNftSets(config, policy));
+    const directNftSets = directPolicies.filter((policy) => policySources(policy, config).includes(source.tag))
+      .flatMap((policy) => destinationNftSets(config, policy));
     lines.push('  chain capture_output {');
     lines.push('    type nat hook output priority dstnat; policy accept;');
     lines.push(`    meta mark ${CAPTURE_ROUTING_MARK} return`);
@@ -112,6 +147,7 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
       lines.push('    tcp dport 53 counter redirect to :5353');
     }
     lines.push('    ip daddr 127.0.0.0/8 return');
+    for (const nftSet of directNftSets) lines.push(`    ip daddr @${nftSet} counter return`);
     for (const nftSet of nftSets) lines.push(`    ip daddr @${nftSet} meta l4proto tcp counter redirect to :${config.capture.listen_port}`);
     lines.push('  }');
     lines.push('  chain output_guard {');
@@ -119,6 +155,7 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
     lines.push(`    meta mark ${CAPTURE_ROUTING_MARK} return`);
     lines.push(`    meta skuid ${MANAGED_DNS_UID} return`);
     lines.push('    meta nfproto ipv6 counter reject');
+    for (const nftSet of directNftSets) lines.push(`    ip daddr @${nftSet} counter return`);
     for (const nftSet of nftSets) {
       lines.push(`    ip daddr @${nftSet} meta l4proto udp counter reject`);
       lines.push(`    ip daddr @${nftSet} meta l4proto tcp counter reject with tcp reset`);
@@ -127,5 +164,25 @@ export function generateNftablesConfig(input, { sourceTag } = {}) {
   }
 
   lines.push('}');
+  return `${lines.join('\n')}\n`;
+}
+
+export function generateNftablesDataUpdate(input, routingData) {
+  const validation = validateConfig(input);
+  if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
+  const config = normalizeConfig(input);
+  const lines = [];
+  for (const [name, destination] of Object.entries(config.destination_sets ?? {})) {
+    const selectors = [
+      [(destination.country_codes ?? []).length > 0, countrySetName(name), routingData?.destination_sets?.[name]?.country_cidrs],
+      [(destination.exact_domains ?? []).length > 0, exactSetName(name), routingData?.destination_sets?.[name]?.exact_ips]
+    ];
+    for (const [required, nftSet, elements] of selectors) {
+      if (!required) continue;
+      if (!Array.isArray(elements) || elements.length === 0) throw new Error(`Routing data is missing elements for nftables set: ${nftSet}`);
+      lines.push(`flush set inet ${config.resources.nftables_table} ${nftSet}`);
+      lines.push(`add element inet ${config.resources.nftables_table} ${nftSet} { ${elements.join(', ')} }`);
+    }
+  }
   return `${lines.join('\n')}\n`;
 }

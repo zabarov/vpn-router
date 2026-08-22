@@ -16,7 +16,7 @@ contain `ip` plus either `awg` or `wg`. Tunnel discovery considers IPv4
 interfaces beginning with `awg`, `wg`, `tun`, or `tap`. XRay/V2Ray discovery
 uses the running container name and image only; it never reads proxy config.
 
-Multiple supported candidates are expected: the version-2 wizard selects them
+Multiple supported candidates are expected: the version-3 wizard selects them
 together. To configure one explicit legacy tunnel source instead, use:
 
 ```sh
@@ -35,8 +35,9 @@ test VPN client first or pass its exact VPN address explicitly.
 
 ```sh
 sudo vpn-router status
-sudo systemctl status vpn-router.service vpn-router-watchdog.timer
-sudo journalctl -u vpn-router.service -u vpn-router-watchdog.service --since today
+sudo vpn-router data-status
+sudo systemctl status vpn-router.service vpn-router-watchdog.timer vpn-router-data-update.timer
+sudo journalctl -u vpn-router.service -u vpn-router-watchdog.service -u vpn-router-data-update.service --since today
 ```
 
 `status_health=drifted` means the root-only manifest says routing was applied
@@ -62,13 +63,34 @@ policy permits `autogroup:internet`.
 
 ## Selected domains do not use the strict exit
 
-- Ensure the client uses the managed system DNS path.
-- Disable browser Secure DNS and other DoH/DoT clients for the strict test.
-- Confirm the suffix is present in `destination_sets`.
-- Remember that direct IP connections, ECH, IPv6, and services on unlisted
-  suffixes are outside the current guarantee.
-- A shared CDN address selected by DNS can affect another hostname using the
-  same address until the bounded nftables timeout expires.
+- Run `sudo vpn-router diagnose example.org` and inspect the matched selector,
+  policy, expected egress, and data freshness.
+- Country CIDRs and exact-domain addresses work without client DNS. Confirm
+  the country code or exact name is in `destination_sets`.
+- For suffix-only rules, ensure the client uses managed system DNS. Secure DNS,
+  DoH/DoT, private resolvers, and ECH make suffix matching best effort.
+- Shared CDN addresses can route another hostname on the same IP through the
+  same egress. Use `always-direct` only after testing that tradeoff.
+
+## Routing data is DEGRADED or FAILED
+
+`DEGRADED` means a fresh last-known-good country or domain entry is still in
+use. `FAILED` means required initial data is missing, integrity validation
+failed, or `max_stale` expired. Existing strict sets remain fail-closed; an
+invalid refresh never replaces them. Check HTTPS access to RIPEstat, server DNS,
+the data-update journal, and then run:
+
+```sh
+sudo vpn-router data-update
+sudo vpn-router data-status
+sudo vpn-router verify --full
+```
+
+`vpn-router diagnose example.com` also reads the active nftables rule counters
+for every source namespace. `egress_status=READY` means the project-owned
+Tailscale exit is running and online. External SOCKS5 and Linux-interface exits
+are reported as `EXTERNAL_MANAGED`; use `vpn-router verify --full` for their
+active reachability check.
 
 ## Selected traffic stops
 

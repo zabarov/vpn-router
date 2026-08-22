@@ -1,27 +1,24 @@
 # VPN Router
 
-VPN Router adds domain-based egress routing on top of VPN software that is
+VPN Router adds policy-based egress routing on top of VPN software that is
 already running on a Linux server. It can apply one policy simultaneously to
 AmneziaWG2, WireGuard/OpenVPN-style tunnel interfaces, and XRay/V2Ray proxy
 containers.
 
 ```text
-VPN users -> existing VPN sources -> managed DNS/IP sets -> selected egress
-                                      unselected traffic -> normal server exit
+VPN users -> existing VPN sources -> server-maintained IP sets -> selected egress
+                                      unmatched traffic -> normal server exit
 ```
 
 It does not install, replace, edit, or restart Amnezia or XRay. Install Amnezia
 normally with the AmneziaVPN application first; VPN Router discovers the
 containers and adds separately owned routing resources.
 
-Status: `0.5.0-pre-alpha`. IPv4/TCP generators, tunnel and proxy-container
-capture, fail-closed behavior, configuration migration, installation, and the
-operator switch are implemented. Kernel network-namespace tracking and an
-opt-in recovery timer cover source stop/start and recreation without overriding
-the manual switch. Reference-host and second-provider real-Amnezia server
-reboot, source restart, active downgrade, and reinstall acceptance pass. The
-release remains pre-alpha until the second-provider external-client smoke,
-compatibility matrix, and reproducible release-artifact gates are complete.
+Status: `0.6.0-alpha.1` candidate. Country CIDRs, pre-resolved exact domains,
+static CIDRs, and managed-DNS suffix observation are implemented with
+last-known-good data and fail-closed behavior. The candidate is not stable or
+production-ready; a second live VPN-host acceptance and the documented
+beta/stable observation gates still apply.
 
 ## Supported topology
 
@@ -33,13 +30,13 @@ One installation can select all supported sources:
   container. The policy covers every user of that container because the
   original VPN client address is no longer available at its outbound socket.
 
-Selected domains can leave through:
+Selected countries, domains, or IP ranges can leave through:
 
 - an isolated Tailscale userspace SOCKS exit;
 - an externally managed SOCKS5 server;
 - an externally managed Linux network interface.
 
-All selected sources share one domain list, one strict egress, and one master
+All selected sources share one policy, one strict egress, and one master
 `enable`/`disable` switch. Unselected traffic keeps each VPN source's existing
 direct path. If capture or the strict egress fails, selected traffic is blocked
 instead of falling back directly.
@@ -58,8 +55,8 @@ sudo vpn-router setup
 ```
 
 `setup` discovers all supported Amnezia tunnel and XRay containers and asks for
-the Tailscale exit plus domain suffixes. It writes a private schema-version-2
-configuration but changes no routing.
+the Tailscale exit, countries, exact domains, suffixes, and direct overrides.
+It writes a private schema-version-3 configuration but changes no routing.
 
 For first Tailscale enrollment, enter a one-off key without saving it to shell
 history or YAML:
@@ -86,6 +83,9 @@ The everyday routing switch is:
 sudo vpn-router disable
 sudo vpn-router enable --rollback-after 600
 sudo vpn-router status
+sudo vpn-router status --json
+sudo vpn-router data-status
+sudo vpn-router diagnose obr.site
 ```
 
 Disabling routing preserves the source VPN containers and Tailscale enrollment.
@@ -95,20 +95,22 @@ runtime, and a manually disabled runtime is never re-enabled by the watchdog.
 
 ## Safety boundary
 
-The guaranteed pre-alpha mode is managed plain DNS with IPv4/TCP. Selected UDP
+The supported alpha mode is IPv4/TCP. Country CIDRs, static CIDRs, and
+server-resolved exact domains do not depend on the client's DNS. Selected UDP
 and QUIC are rejected, and IPv6 is rejected for proxy-container sources or
-refused during tunnel preflight. Browser DoH/DoT, ECH, private resolvers,
-direct-IP connections, cached answers from before enable, and shared-CDN
-addresses require explicit acceptance testing.
+refused during tunnel preflight. Arbitrary suffix matching still depends on
+managed plain DNS, so browser DoH/DoT, ECH, and private resolvers make suffix
+routing best effort. Shared-CDN IPs can route neighboring names through the
+same egress.
 
-Domain suffixes are operator data, not a geographic database. The repository
-ships only reserved examples. Use punycode for internationalized names and add
-every required service deliberately.
+Country data comes from RIPEstat and represents registered Internet resources,
+not guaranteed physical location. Use punycode for internationalized names and
+add service-specific exceptions deliberately.
 
 ## Configuration and compatibility
 
 The public example is [`config.example.yaml`](config.example.yaml). Existing
-schema-version-1 files remain readable and can be migrated without overwriting
+schema-version-1 and version-2 files remain readable and can be migrated without overwriting
 the original:
 
 ```sh
@@ -140,6 +142,15 @@ npm run check
 npm run check:containers
 npm run check:clean-host
 ```
+
+Maintainers build a secret-safe archive only from a clean committed tree:
+
+```sh
+npm run build:release
+```
+
+The builder uses Git's tracked-file archive, refuses untracked public files,
+and rejects private `.env` paths before writing the checksum.
 
 ## License
 
