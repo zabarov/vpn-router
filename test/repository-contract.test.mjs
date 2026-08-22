@@ -28,6 +28,8 @@ test('release packaging uses a clean tracked-file allowlist and rejects private 
   assert.match(script, /git ls-files --others --exclude-standard/);
   assert.match(script, /source\/\*/);
   assert.match(script, /[.]env[.][*]/);
+  assert.match(script, /sha256sum/);
+  assert.match(script, /shasum -a 256/);
   assert.doesNotMatch(script, /tar .*\.[/]/);
 });
 

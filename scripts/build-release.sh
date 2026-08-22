@@ -24,9 +24,11 @@ checksum="$archive.sha256"
 
 temporary_tar=$(mktemp /tmp/vpn-router-release.XXXXXX)
 temporary_archive="$archive.new"
+temporary_checksum="$checksum.new"
 cleanup() {
   [[ ! -e "$temporary_tar" ]] || /bin/rm -- "$temporary_tar"
   [[ ! -e "$temporary_archive" ]] || /bin/rm -- "$temporary_archive"
+  [[ ! -e "$temporary_checksum" ]] || /bin/rm -- "$temporary_checksum"
 }
 trap cleanup EXIT
 
@@ -42,8 +44,17 @@ while IFS= read -r entry; do
   esac
 done < <(tar -tzf "$temporary_archive")
 
+if command -v sha256sum >/dev/null; then
+  digest=$(sha256sum "$temporary_archive" | awk '{print $1}')
+elif command -v shasum >/dev/null; then
+  digest=$(shasum -a 256 "$temporary_archive" | awk '{print $1}')
+else
+  echo 'release=FAIL: sha256sum or shasum is required' >&2
+  exit 1
+fi
+printf '%s  %s\n' "$digest" "$(basename -- "$archive")" >"$temporary_checksum"
 mv -- "$temporary_archive" "$archive"
-sha256sum "$archive" >"$checksum"
+mv -- "$temporary_checksum" "$checksum"
 chmod 644 "$archive" "$checksum"
 echo 'release=PASS'
 echo "archive=$archive"
