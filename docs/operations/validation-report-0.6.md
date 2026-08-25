@@ -66,7 +66,8 @@ than changing their mode.
 The corrected clean package then passed a real systemd first refresh and timer
 restart on the independent host. On the reference host it refreshed an expired
 live state atomically, retained the custom configuration, scheduled the next
-timer run, kept `/tmp` at mode `1777`, and returned full status to `READY`.
+timer run, completed the following automatic five-minute trigger, kept `/tmp`
+at mode `1777`, and returned full status to `READY`.
 
 ## Independent-host lifecycle
 
