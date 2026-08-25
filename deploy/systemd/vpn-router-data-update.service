@@ -3,11 +3,11 @@ Description=VPN Router routing data update
 Documentation=https://github.com/zabarov/vpn-router
 After=network-online.target docker.service
 Wants=network-online.target
-ConditionPathExists=@CONFIG_PATH@
+ConditionPathExists=@ACTIVE_CONFIG_PATH@
 
 [Service]
 Type=oneshot
-Environment=VPN_ROUTER_CONFIG=@CONFIG_PATH@
 Environment=VPN_ROUTER_NODE=@NODE_PATH@
-ExecStart=@CURRENT_PATH@/scripts/vpn-router-data-update.sh --config @CONFIG_PATH@
+Environment=VPN_ROUTER_ACTIVE_CONFIG_FILE=@ACTIVE_CONFIG_PATH@
+ExecStart=@CURRENT_PATH@/scripts/vpn-router-data-update.sh
 TimeoutStartSec=180

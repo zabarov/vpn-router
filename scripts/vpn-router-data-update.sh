@@ -4,7 +4,13 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
 node_bin=${VPN_ROUTER_NODE:-node}
-config_path=${VPN_ROUTER_CONFIG:-/etc/vpn-router/router.yaml}
+active_config_file=${VPN_ROUTER_ACTIVE_CONFIG_FILE:-/var/lib/vpn-router-installer/active-config}
+config_path=${VPN_ROUTER_CONFIG-}
+
+if [[ -z "$config_path" && -f "$active_config_file" ]]; then
+  IFS= read -r config_path <"$active_config_file"
+fi
+config_path=${config_path:-/etc/vpn-router/router.yaml}
 
 usage() {
   echo 'Usage: vpn-router-data-update.sh [--config <router.yaml>]' >&2

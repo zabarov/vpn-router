@@ -5,6 +5,7 @@ script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
 node_bin=${VPN_ROUTER_NODE:-node}
 default_config=${VPN_ROUTER_CONFIG:-/etc/vpn-router/router.yaml}
+active_config_file=${VPN_ROUTER_ACTIVE_CONFIG_FILE:-/var/lib/vpn-router-installer/active-config}
 
 usage() {
   cat >&2 <<'EOF'
@@ -46,6 +47,51 @@ run_lifecycle() {
     exec "$script_dir/vpn-router-lifecycle.sh" "$command_name" "$@"
   fi
   exec "$script_dir/vpn-router-lifecycle.sh" "$command_name" --config "$default_config" "$@"
+}
+
+config_value_from_args() {
+  local fallback=$1 argument next=false
+  shift
+  for argument in "$@"; do
+    if [[ "$next" == true ]]; then printf '%s\n' "$argument"; return 0; fi
+    [[ "$argument" != --config ]] || next=true
+  done
+  printf '%s\n' "$fallback"
+}
+
+canonical_config_path() {
+  local value=$1
+  [[ "$value" != *$'\n'* && -f "$value" ]] || { echo 'active-config=FAIL: configuration path is invalid' >&2; return 1; }
+  printf '%s/%s\n' "$(cd -- "$(dirname -- "$value")" && pwd)" "$(basename -- "$value")"
+}
+
+record_active_config() {
+  local value=$1 directory temporary
+  value=$(canonical_config_path "$value")
+  directory=$(dirname -- "$active_config_file")
+  temporary="$active_config_file.$$.tmp"
+  mkdir -p -- "$directory"
+  chmod 700 "$directory"
+  printf '%s\n' "$value" >"$temporary"
+  chmod 600 "$temporary"
+  mv -f -- "$temporary" "$active_config_file"
+}
+
+clear_active_config() {
+  local value=$1 recorded=''
+  value=$(canonical_config_path "$value")
+  [[ ! -f "$active_config_file" ]] || IFS= read -r recorded <"$active_config_file"
+  [[ -n "$recorded" && "$recorded" != "$value" ]] || rm -f -- "$active_config_file"
+}
+
+start_data_timer() {
+  local config=$1
+  [[ -f /etc/systemd/system/vpn-router-data-update.timer ]] || return 0
+  record_active_config "$config"
+  if ! systemctl enable --now vpn-router-data-update.timer; then
+    clear_active_config "$config"
+    return 1
+  fi
 }
 
 case "$command_name" in
@@ -138,9 +184,15 @@ case "$command_name" in
     echo 'verify_full=PASS'
     ;;
   disable)
+    disable_config=$(config_value_from_args "$default_config" "$@")
     systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
     systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
-    run_lifecycle "$@"
+    if config_args "$@"; then
+      "$script_dir/vpn-router-lifecycle.sh" disable "$@"
+    else
+      "$script_dir/vpn-router-lifecycle.sh" disable --config "$default_config" "$@"
+    fi
+    clear_active_config "$disable_config"
     ;;
   enable)
     if config_args "$@"; then
@@ -152,15 +204,36 @@ case "$command_name" in
       "$script_dir/vpn-router-lifecycle.sh" enable --config "$default_config" "$@"
       enable_config=$default_config
     fi
-    if [[ -f /etc/systemd/system/vpn-router-data-update.timer ]]; then
-      if ! systemctl enable --now vpn-router-data-update.timer; then
-        "$script_dir/vpn-router-lifecycle.sh" disable --config "$enable_config" >/dev/null 2>&1 || true
-        echo 'enable=FAIL: data updater could not start; routing was disabled again' >&2
-        exit 1
-      fi
+    if ! start_data_timer "$enable_config"; then
+      "$script_dir/vpn-router-lifecycle.sh" disable --config "$enable_config" >/dev/null 2>&1 || true
+      echo 'enable=FAIL: data updater could not start; routing was disabled again' >&2
+      exit 1
     fi
     ;;
-  preflight|rollback|reconcile)
+  rollback)
+    rollback_config=$(config_value_from_args "$default_config" "$@")
+    systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
+    systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
+    if config_args "$@"; then
+      "$script_dir/vpn-router-lifecycle.sh" rollback "$@"
+    else
+      "$script_dir/vpn-router-lifecycle.sh" rollback --config "$default_config" "$@"
+    fi
+    clear_active_config "$rollback_config"
+    ;;
+  reconcile)
+    reconcile_config=$(config_value_from_args "$default_config" "$@")
+    if config_args "$@"; then
+      "$script_dir/vpn-router-lifecycle.sh" reconcile "$@"
+    else
+      "$script_dir/vpn-router-lifecycle.sh" reconcile --config "$default_config" "$@"
+    fi
+    if ! start_data_timer "$reconcile_config"; then
+      echo 'reconcile=FAIL: routing data timer could not start' >&2
+      exit 1
+    fi
+    ;;
+  preflight)
     run_lifecycle "$@"
     ;;
   service-enable)
@@ -171,14 +244,21 @@ case "$command_name" in
     fi
     [[ $# -eq 0 ]] || { usage; exit 2; }
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" validate --config "$default_config" >/dev/null
-    systemctl enable --now vpn-router.service
+    record_active_config "$default_config"
+    if ! systemctl enable --now vpn-router.service; then
+      clear_active_config "$default_config"
+      echo 'service-enable=FAIL: routing service could not start' >&2
+      exit 1
+    fi
     if ! systemctl enable --now vpn-router-watchdog.timer; then
       systemctl disable --now vpn-router.service >/dev/null 2>&1 || true
+      clear_active_config "$default_config"
       echo 'service-enable=FAIL: watchdog timer could not start; routing was disabled again' >&2
       exit 1
     fi
     if ! systemctl enable --now vpn-router-data-update.timer; then
       systemctl disable --now vpn-router-watchdog.timer vpn-router.service >/dev/null 2>&1 || true
+      clear_active_config "$default_config"
       echo 'service-enable=FAIL: routing data timer could not start; routing was disabled again' >&2
       exit 1
     fi
@@ -191,6 +271,7 @@ case "$command_name" in
     systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
     systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
     systemctl disable --now vpn-router.service
+    clear_active_config "$default_config"
     echo 'service-disable=PASS'
     ;;
   service-status)

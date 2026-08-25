@@ -65,8 +65,17 @@ test('routing data updater is private, transactional, and systemd-managed', () =
   assert.match(dataUpdate, /install -m 600/);
   assert.match(dataUpdateUnit, /Type=oneshot/);
   assert.match(dataUpdateUnit, /vpn-router-data-update[.]sh/);
+  assert.match(dataUpdateUnit, /ConditionPathExists=@ACTIVE_CONFIG_PATH@/);
+  assert.match(dataUpdateUnit, /VPN_ROUTER_ACTIVE_CONFIG_FILE=@ACTIVE_CONFIG_PATH@/);
+  assert.doesNotMatch(dataUpdateUnit, /--config @CONFIG_PATH@/);
+  assert.match(dataUpdate, /VPN_ROUTER_ACTIVE_CONFIG_FILE/);
+  assert.match(dataUpdate, /IFS= read -r config_path/);
   assert.match(dataUpdateTimer, /OnUnitActiveSec=5min/);
   assert.match(install, /vpn-router-data-update[.]service vpn-router-data-update[.]timer/);
+  assert.match(install, /@ACTIVE_CONFIG_PATH@/);
+  assert.match(install, /systemctl restart vpn-router-data-update[.]timer/);
+  assert.match(command, /record_active_config/);
+  assert.match(command, /clear_active_config/);
   assert.match(command, /enable --now vpn-router-data-update[.]timer/);
   assert.match(command, /stop vpn-router-data-update[.]service/);
 });

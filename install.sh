@@ -215,21 +215,26 @@ write_command_wrapper() {
 }
 
 write_systemd_units() {
-  local node_path=$1 unit_name unit_path unit_temp
+  local node_path=$1 unit_name unit_path unit_temp data_timer_active=false
   [[ "$systemd_enabled" == true ]] || return 0
+  if [[ "$root" == / ]] && systemctl is-active --quiet vpn-router-data-update.timer; then data_timer_active=true; fi
   for unit_name in vpn-router.service vpn-router-watchdog.service vpn-router-watchdog.timer vpn-router-data-update.service vpn-router-data-update.timer; do
     unit_path=$(physical "/etc/systemd/system/$unit_name")
     unit_temp="$unit_path.$$.tmp"
     mkdir -p "$(dirname -- "$unit_path")"
     sed \
       -e "s|@CONFIG_PATH@|$config_dir/router.yaml|g" \
+      -e "s|@ACTIVE_CONFIG_PATH@|$state_path/active-config|g" \
       -e "s|@NODE_PATH@|$node_path|g" \
       -e "s|@CURRENT_PATH@|$prefix/current|g" \
       "$source_dir/deploy/systemd/$unit_name" >"$unit_temp"
     chmod 644 "$unit_temp"
     mv -f "$unit_temp" "$unit_path"
   done
-  if [[ "$root" == / ]]; then systemctl daemon-reload; fi
+  if [[ "$root" == / ]]; then
+    systemctl daemon-reload
+    [[ "$data_timer_active" != true ]] || systemctl restart vpn-router-data-update.timer
+  fi
 }
 
 install_release() {
@@ -335,6 +340,7 @@ uninstall_release() {
     systemctl disable --now vpn-router-watchdog.timer >/dev/null 2>&1 || true
     systemctl disable --now vpn-router-data-update.timer >/dev/null 2>&1 || true
     systemctl stop vpn-router-data-update.service >/dev/null 2>&1 || true
+    rm -f "$state_path/active-config"
   fi
   if [[ "$root" == / && "$systemd_enabled" == true && -f /etc/systemd/system/vpn-router.service ]]; then
     if systemctl is-active --quiet vpn-router.service; then

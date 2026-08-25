@@ -86,6 +86,11 @@ sudo vpn-router data-status
 sudo vpn-router verify --full
 ```
 
+The updater follows the exact configuration last activated by `enable`, even
+when `--config` selects a non-default path. Its root-only pointer is removed by
+`disable`, `rollback`, and uninstall. If a timer was active during upgrade, the
+installer reloads and restarts it so the next run remains scheduled.
+
 `vpn-router diagnose example.com` also reads the active nftables rule counters
 for every source namespace. `egress_status=READY` means the project-owned
 Tailscale exit is running and online. External SOCKS5 and Linux-interface exits

@@ -27,6 +27,9 @@ All notable changes are documented here.
   candidate restoration without changing the source VPN containers.
 - Add a reproducible tracked-file release builder that refuses dirty trees and
   excludes private environment and `source/` material by construction.
+- Bind the periodic updater to the exact configuration enabled by the operator,
+  preserve that root-only pointer across upgrades, and restart an already active
+  timer after systemd unit replacement.
 
 ## 0.5.0-pre-alpha - Unreleased
 
