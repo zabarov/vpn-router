@@ -52,6 +52,22 @@ new deadman. This test exposed and then verified the fix for a lifecycle race:
 disable must stop an already-running data-update service in addition to its
 timer before changing versions.
 
+A multi-day follow-up deliberately re-read the live state instead of assuming
+the initial success persisted. It found that a custom canary configuration was
+not retained by the periodic systemd updater after upgrade. The stale state
+correctly became `FAILED` and the existing strict sets remained fail-closed.
+The correction now stores the exact active configuration in a root-only
+pointer, restarts an active timer after unit replacement, supports an initial
+refresh without previous state, and keeps temporary state below a private
+directory. A shared `/tmp` permission regression found during this audit was
+repaired and is covered by a test that refuses unsafe parent directories rather
+than changing their mode.
+
+The corrected clean package then passed a real systemd first refresh and timer
+restart on the independent host. On the reference host it refreshed an expired
+live state atomically, retained the custom configuration, scheduled the next
+timer run, kept `/tmp` at mode `1777`, and returned full status to `READY`.
+
 ## Independent-host lifecycle
 
 A separate clean Ubuntu host verified the candidate archive checksum and then

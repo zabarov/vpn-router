@@ -91,6 +91,17 @@ test('rejects empty initial data and retains a fresh set after suspicious shrink
   assert.match(retained.countries.RU.retained_error, /shrank by more than 50 percent/);
 });
 
+test('rejects malformed and oversized provider responses before changing state', async () => {
+  await assert.rejects(buildRoutingDataState(config(), {
+    fetchImpl: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '{broken' }),
+    resolve4: async () => [{ address: '188.40.167.81', ttl: 300 }]
+  }), /invalid JSON/);
+  await assert.rejects(buildRoutingDataState(config(), {
+    fetchImpl: async () => ({ ok: true, status: 200, headers: { get: (name) => name === 'content-length' ? String(9 * 1024 * 1024) : null }, text: async () => '{}' }),
+    resolve4: async () => [{ address: '188.40.167.81', ttl: 300 }]
+  }), /size limit/);
+});
+
 test('writes an atomic private state file with integrity verification', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'vpn-router-data-'));
   const path = join(directory, 'state.json');

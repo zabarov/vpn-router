@@ -8,7 +8,7 @@ but it has not completed a live two-source VPN routing canary.
 | Gate | Required evidence | Current state |
 | --- | --- | --- |
 | Configuration | Schema 3, schema 1/2 migration, negative validation | Passed locally; candidate CI pending |
-| Routing data | RIPEstat, exact-domain resolver, last-known-good, stale and shrink guards | Passed in deterministic tests and on two independent Ubuntu hosts |
+| Routing data | RIPEstat, exact-domain resolver, last-known-good, stale and shrink guards | Passed in deterministic tests, real systemd first-run/upgrade checks, and on two independent Ubuntu hosts |
 | Egress portability | Tailscale SOCKS, external SOCKS5, Linux interface fixtures | External SOCKS5 passes both container-source and real host-interface paths; Linux-interface strict egress remains fixture-only |
 | Routing switch | Transactional multi-source enable/disable with preserved VPN and egress state | Passed for simultaneous AWG2 and XRay sources on the guarded reference host |
 | Multi-client | Two selected clients and one excluded client in a disposable lab | Passed in the disposable redirect lab |
