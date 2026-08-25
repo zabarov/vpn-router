@@ -61,6 +61,7 @@ test('installed command exposes configuration, lifecycle, service, and routing s
 test('routing data updater is private, transactional, and systemd-managed', () => {
   assert.match(dataUpdate, /flock -n/);
   assert.match(dataUpdate, /render-data-update/);
+  assert.match(dataUpdate, /render-data-restore/);
   assert.match(dataUpdate, /previous data was restored/);
   assert.match(dataUpdate, /install -m 600/);
   assert.match(dataUpdate, /mktemp -d \/tmp\/vpn-router-data-update/);

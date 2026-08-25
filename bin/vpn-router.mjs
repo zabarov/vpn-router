@@ -12,7 +12,7 @@ import { buildRuntimePlan } from '../src/runtime-plan.mjs';
 import { assessRoutingDataState, defaultRoutingDataPath, readRoutingDataState, routingDataRequirements } from '../src/routing-data.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-dnsmasq|render-runtime-env|render-runtime-plan> --config <path>\n       vpn-router render-sing-box --config <path> [--source <tag>]\n       vpn-router render-nftables --config <path> [--source <tag>] [--routing-data <path>]\n       vpn-router render-data-update --config <path> --routing-data <path>\n       vpn-router migrate-config --input <path> --output <path>';
+  return 'Usage: vpn-router <validate|render-dnsmasq|render-runtime-env|render-runtime-plan> --config <path>\n       vpn-router render-sing-box --config <path> [--source <tag>]\n       vpn-router render-nftables --config <path> [--source <tag>] [--routing-data <path>]\n       vpn-router <render-data-update|render-data-restore> --config <path> --routing-data <path>\n       vpn-router migrate-config --input <path> --output <path>';
 }
 
 function parseRenderOptions(args) {
@@ -49,13 +49,13 @@ async function main(argv) {
     return;
   }
   const command = argv[0];
-  if (!['validate', 'render-sing-box', 'render-nftables', 'render-data-update', 'render-dnsmasq', 'render-runtime-env', 'render-runtime-plan'].includes(command)) {
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-data-update', 'render-data-restore', 'render-dnsmasq', 'render-runtime-env', 'render-runtime-plan'].includes(command)) {
     throw new Error(usage());
   }
   const options = parseRenderOptions(argv.slice(1));
   const { configPath, sourceTag } = options;
-  if (!['render-nftables', 'render-data-update'].includes(command) && options.routingDataPath) throw new Error(usage());
-  if (command === 'render-data-update' && (!options.routingDataPath || sourceTag)) throw new Error(usage());
+  if (!['render-nftables', 'render-data-update', 'render-data-restore'].includes(command) && options.routingDataPath) throw new Error(usage());
+  if (['render-data-update', 'render-data-restore'].includes(command) && (!options.routingDataPath || sourceTag)) throw new Error(usage());
   if (!['render-nftables', 'render-sing-box'].includes(command) && sourceTag) throw new Error(usage());
 
   const source = await readFile(configPath, 'utf8');
@@ -86,10 +86,13 @@ async function main(argv) {
     process.stdout.write(generateNftablesConfig(config, { sourceTag, routingData }));
     return;
   }
-  if (command === 'render-data-update') {
+  if (command === 'render-data-update' || command === 'render-data-restore') {
     const routingData = await readRoutingDataState(options.routingDataPath);
     const assessment = assessRoutingDataState(rawConfig, routingData);
-    if (assessment.status === 'FAILED') throw new Error(`Routing data is not usable: ${assessment.warnings.join(', ')}`);
+    const structuralFailure = assessment.warnings.some((warning) => ['state_missing', 'config_mismatch'].includes(warning));
+    if (assessment.status === 'FAILED' && (command !== 'render-data-restore' || structuralFailure)) {
+      throw new Error(`Routing data is not usable: ${assessment.warnings.join(', ')}`);
+    }
     process.stdout.write(generateNftablesDataUpdate(rawConfig, routingData));
     return;
   }

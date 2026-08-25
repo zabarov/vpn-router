@@ -128,6 +128,26 @@ test('reports expired required data as FAILED without discarding it', async () =
   assert.deepEqual(state.destination_sets.regional.country_cidrs, ['5.8.0.0/13']);
 });
 
+test('stale data is rejected for activation but remains usable only as an atomic rollback snapshot', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vpn-router-stale-restore-'));
+  const configPath = join(directory, 'router.yaml');
+  const statePath = join(directory, 'state.json');
+  await writeFile(configPath, stringify(config()), { mode: 0o600 });
+  const state = await buildRoutingDataState(config(), {
+    now: new Date('2026-08-01T00:00:00Z'),
+    fetchImpl: async () => response(['5.8.0.0/13']),
+    resolve4: async () => [{ address: '188.40.167.81', ttl: 300 }]
+  });
+  await writeRoutingDataState(statePath, state);
+  const cli = new URL('../bin/vpn-router.mjs', import.meta.url).pathname;
+  const rejected = spawnSync(process.execPath, [cli, 'render-data-update', '--config', configPath, '--routing-data', statePath], { encoding: 'utf8' });
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /Routing data is not usable/);
+  const restored = spawnSync(process.execPath, [cli, 'render-data-restore', '--config', configPath, '--routing-data', statePath], { encoding: 'utf8' });
+  assert.equal(restored.status, 0, restored.stderr);
+  assert.match(restored.stdout, /flush set inet vpn_router set_regional_country/);
+});
+
 test('data status CLI reads the verified state instead of an undefined runtime value', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'vpn-router-data-cli-'));
   const configPath = join(directory, 'router.yaml');

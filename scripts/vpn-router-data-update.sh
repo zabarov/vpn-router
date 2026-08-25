@@ -65,7 +65,7 @@ if [[ -f "$manifest" ]]; then
       exit 1
     }
     [[ -f "$state" ]] || { echo 'data-update=FAIL: active schema 3 runtime has no previous data state' >&2; exit 1; }
-    "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-data-update --config "$config_path" --routing-data "$state" >"$old_rules"
+    "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-data-restore --config "$config_path" --routing-data "$state" >"$old_rules"
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-runtime-plan --config "$config_path" >"$plan"
     active=true
   fi

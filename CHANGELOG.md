@@ -33,6 +33,8 @@ All notable changes are documented here.
 - Keep routing-data temporary files inside private subdirectories and refuse
   unsafe parent permissions instead of modifying shared directories such as
   `/tmp`; support the first updater run when no previous state exists.
+- Allow an integrity-checked stale set only as the compensation snapshot for an
+  atomic refresh; stale data remains forbidden as a newly activated set.
 
 ## 0.5.0-pre-alpha - Unreleased
 
