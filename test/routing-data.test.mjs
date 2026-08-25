@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -101,6 +101,18 @@ test('writes an atomic private state file with integrity verification', async ()
   await writeRoutingDataState(path, state);
   assert.equal((await stat(path)).mode & 0o777, 0o600);
   assert.deepEqual(await readRoutingDataState(path), state);
+});
+
+test('refuses a shared state directory instead of changing its permissions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vpn-router-public-data-'));
+  await chmod(directory, 0o755);
+  const path = join(directory, 'state.json');
+  const state = await buildRoutingDataState(config(), {
+    fetchImpl: async () => response(['5.8.0.0/13']),
+    resolve4: async () => [{ address: '188.40.167.81', ttl: 300 }]
+  });
+  await assert.rejects(writeRoutingDataState(path, state), /directory must be private/);
+  assert.equal((await stat(directory)).mode & 0o777, 0o755);
 });
 
 test('reports expired required data as FAILED without discarding it', async () => {

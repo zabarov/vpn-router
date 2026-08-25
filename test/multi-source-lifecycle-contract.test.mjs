@@ -21,6 +21,7 @@ test('schema 3 refreshes private data before apply and verifies freshness', () =
   assert.match(lifecycle, /verify=FAIL: routing data is unavailable or stale/);
   assert.match(lifecycle, /vpn-router-data-update[.]timer/);
   assert.match(lifecycle, /stop vpn-router-data-update[.]service/);
+  assert.match(lifecycle, /mktemp -d \/tmp\/vpn-router-data/);
 });
 
 test('multi-source enable arms rollback before applying namespace state', () => {

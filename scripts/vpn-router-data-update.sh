@@ -36,19 +36,22 @@ state="$data_dir/state.json"
 runtime_dir="$state_root/runtime"
 manifest="$runtime_dir/multi-source-manifest.env"
 stored_config="$runtime_dir/multi-source-config.yaml"
-plan=$(mktemp /tmp/vpn-router-data-plan.XXXXXX)
-next=$(mktemp /tmp/vpn-router-data-state.XXXXXX)
-next_rules=$(mktemp /tmp/vpn-router-data-rules.XXXXXX)
-old_rules=$(mktemp /tmp/vpn-router-data-old-rules.XXXXXX)
-applied=$(mktemp /tmp/vpn-router-data-applied.XXXXXX)
+work_dir=$(mktemp -d /tmp/vpn-router-data-update.XXXXXX)
+chmod 700 "$work_dir"
+plan="$work_dir/plan.json"
+next="$work_dir/state.json"
+next_rules="$work_dir/next.nft"
+old_rules="$work_dir/old.nft"
+applied="$work_dir/applied.tsv"
 state_new="$state.new"
-cleanup() { rm -f "$plan" "$next" "$next_rules" "$old_rules" "$applied" "$state_new"; }
+cleanup() { rm -rf "$work_dir"; rm -f "$state_new"; }
 trap cleanup EXIT
-chmod 600 "$plan" "$next" "$next_rules" "$old_rules" "$applied"
+touch "$plan" "$next_rules" "$old_rules" "$applied"
+chmod 600 "$plan" "$next_rules" "$old_rules" "$applied"
 
 mkdir -p "$data_dir"
 chmod 700 "$state_root" "$data_dir"
-[[ ! -f "$state" ]] || cp "$state" "$next"
+[[ ! -f "$state" ]] || { cp "$state" "$next"; chmod 600 "$next"; }
 "$node_bin" "$repo_dir/bin/vpn-router-data.mjs" update --config "$config_path" --state "$next" >/dev/null
 "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-data-update --config "$config_path" --routing-data "$next" >"$next_rules"
 

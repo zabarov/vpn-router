@@ -30,6 +30,9 @@ All notable changes are documented here.
 - Bind the periodic updater to the exact configuration enabled by the operator,
   preserve that root-only pointer across upgrades, and restart an already active
   timer after systemd unit replacement.
+- Keep routing-data temporary files inside private subdirectories and refuse
+  unsafe parent permissions instead of modifying shared directories such as
+  `/tmp`; support the first updater run when no previous state exists.
 
 ## 0.5.0-pre-alpha - Unreleased
 

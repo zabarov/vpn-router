@@ -334,15 +334,16 @@ preflight() {
   fi
   mkdir -p "$RUNTIME_DIR" "$ARTIFACT_DIR"; chmod 700 "$STATE_ROOT" "$RUNTIME_DIR" "$ARTIFACT_DIR"
   docker image inspect "$DNS_IMAGE" >/dev/null 2>&1 || docker build -q -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
-  local preflight_data=''
+  local preflight_data='' preflight_data_dir=''
   if [[ $(json_value config_schema_version) == 3.0 ]]; then
-    preflight_data=$(mktemp /tmp/vpn-router-data.XXXXXX)
-    rm -f "$preflight_data"
+    preflight_data_dir=$(mktemp -d /tmp/vpn-router-data.XXXXXX)
+    chmod 700 "$preflight_data_dir"
+    preflight_data="$preflight_data_dir/state.json"
     if [[ -f "$DATA_STATE" ]]; then cp "$DATA_STATE" "$preflight_data"; chmod 600 "$preflight_data"; fi
-    if ! refresh_routing_data "$preflight_data"; then rm -f "$preflight_data"; return 1; fi
+    if ! refresh_routing_data "$preflight_data"; then rm -rf "$preflight_data_dir"; return 1; fi
   fi
   render_artifacts "$preflight_data"
-  [[ -z "$preflight_data" ]] || rm -f "$preflight_data"
+  [[ -z "$preflight_data_dir" ]] || rm -rf "$preflight_data_dir"
   if [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]]; then
     while IFS=$'\t' read -r tag namespace container source_tag capture dns; do healthcheck_group "$namespace" "$container"; done < <(groups_tsv)
   fi

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Resolver } from 'node:dns/promises';
-import { chmod, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { dirname } from 'node:path';
 import { validateConfig } from './config-validator.mjs';
@@ -239,8 +239,10 @@ export async function readRoutingDataState(path) {
 }
 
 export async function writeRoutingDataState(path, state) {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await chmod(dirname(path), 0o700);
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const directoryMode = (await stat(directory)).mode & 0o777;
+  if ((directoryMode & 0o077) !== 0) throw new Error(`routing data directory must be private (0700 or stricter): ${directory}`);
   const temporary = `${path}.tmp-${process.pid}`;
   const handle = await open(temporary, 'wx', 0o600);
   try {

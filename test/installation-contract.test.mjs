@@ -63,6 +63,7 @@ test('routing data updater is private, transactional, and systemd-managed', () =
   assert.match(dataUpdate, /render-data-update/);
   assert.match(dataUpdate, /previous data was restored/);
   assert.match(dataUpdate, /install -m 600/);
+  assert.match(dataUpdate, /mktemp -d \/tmp\/vpn-router-data-update/);
   assert.match(dataUpdateUnit, /Type=oneshot/);
   assert.match(dataUpdateUnit, /vpn-router-data-update[.]sh/);
   assert.match(dataUpdateUnit, /ConditionPathExists=@ACTIVE_CONFIG_PATH@/);
