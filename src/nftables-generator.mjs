@@ -1,5 +1,6 @@
 import { validateConfig } from './config-validator.mjs';
 import { normalizeConfig, policySources, sourceClientScope, sourceClientSetName, sourceNamespace } from './config-normalizer.mjs';
+import { buildRuntimePlan } from './runtime-plan.mjs';
 
 export const CAPTURE_ROUTING_MARK = 0x5254;
 export const MANAGED_DNS_UID = 65534;
@@ -60,6 +61,7 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
   const validation = validateConfig(input);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
   const config = normalizeConfig(input);
+  const managedDns = buildRuntimePlan(input).managed_dns;
   const sources = sourcesForNamespace(config, sourceTag);
   const sourceTags = new Set(sources.map((source) => source.tag));
   const strictPolicies = config.policies.filter((policy) => policy.failure_mode === 'block' &&
@@ -113,7 +115,7 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
     }
     lines.push('  chain capture_redirect {');
     lines.push('    type nat hook prerouting priority dstnat; policy accept;');
-    if (config.traffic_handling.dns_mode === 'managed') {
+    if (managedDns) {
       for (const source of tunnelSources) {
         lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} udp dport 53 counter redirect to :5353`);
         lines.push(`    iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} tcp dport 53 counter redirect to :5353`);
@@ -142,7 +144,7 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
     lines.push('    type nat hook output priority dstnat; policy accept;');
     lines.push(`    meta mark ${CAPTURE_ROUTING_MARK} return`);
     lines.push(`    meta skuid ${MANAGED_DNS_UID} return`);
-    if (config.traffic_handling.dns_mode === 'managed') {
+    if (managedDns) {
       lines.push('    udp dport 53 counter redirect to :5353');
       lines.push('    tcp dport 53 counter redirect to :5353');
     }

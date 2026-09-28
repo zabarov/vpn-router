@@ -95,6 +95,25 @@ test('renders hybrid server data once and gives direct overrides first priority'
   assert.equal((update.match(/flush set inet vpn_router set_regional_services_country/g) ?? []).length, 1);
 });
 
+test('exact-domain-only routing leaves DNS untouched when no DNS sidecar is started', () => {
+  const exactOnly = structuredClone(config);
+  exactOnly.schema_version = '3.0';
+  exactOnly.sources = [{ tag: 'amnezia-in', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'address_list', addresses: ['10.8.1.1/32'] } }];
+  exactOnly.policies = config.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['amnezia-in'] }));
+  exactOnly.destination_sets['regional-services'] = { exact_domains: ['selected.example'], ip_cidrs: [], domain_suffixes: [] };
+  exactOnly.routing_data = { country_provider: { type: 'ripestat', refresh_interval: '24h', max_stale: '7d' }, domain_resolver: { refresh_interval: '5m', min_ttl: 60, max_ttl: 3600, max_stale: '24h' } };
+  const routingData = { destination_sets: { 'regional-services': { exact_ips: ['203.0.113.44'] } } };
+
+  const tunnel = generateNftablesConfig(exactOnly, { routingData });
+  assert.doesNotMatch(tunnel, /dport 53/);
+  assert.match(tunnel, /ip daddr @set_regional_services_exact meta l4proto tcp counter redirect to :12345/);
+
+  exactOnly.sources = [{ tag: 'amnezia-in', type: 'container_egress', container_name: 'amnezia-xray', clients: { mode: 'all' } }];
+  const output = generateNftablesConfig(exactOnly, { routingData });
+  assert.doesNotMatch(output, /dport 53/);
+  assert.match(output, /ip daddr @set_regional_services_exact meta l4proto tcp counter redirect to :12345/);
+});
+
 test('refuses dynamic selectors without verified routing data', () => {
   const hybrid = structuredClone(config);
   hybrid.schema_version = '3.0';

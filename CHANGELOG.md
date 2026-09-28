@@ -4,6 +4,9 @@ All notable changes are documented here.
 
 ## 0.6.0-alpha.1 - Unreleased
 
+- Do not redirect client DNS when a policy uses only server-resolved exact
+  domains and no managed-DNS sidecar is started. This fixes a canary outage in
+  which ordinary sites stopped resolving despite an otherwise healthy VPN.
 - Add schema version 3 with ordered `always-direct`, strict, and default-direct
   policies across all configured tunnel and proxy-container sources.
 - Add RIPEstat country resources, server-resolved exact domains, static CIDRs,

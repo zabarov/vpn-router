@@ -104,6 +104,17 @@ unavailable. Ordinary unselected traffic should remain direct. Restore the
 egress, run `vpn-router verify`, and use `vpn-router disable` if the strict path
 cannot be recovered promptly.
 
+## Ordinary sites stop resolving after enable
+
+Disable routing immediately and verify that the underlying VPN works without
+VPN Router. For an exact-domain-only policy, the server pre-resolves selected
+addresses, so a managed-DNS sidecar is not started and client DNS must remain
+unchanged. If nftables still redirects port 53 to `:5353` in this mode, the
+installed version has a DNS-capture mismatch; upgrade to a version containing
+the fix before enabling routing again. Do not treat a passing structural
+`verify` as proof that client DNS works: test one ordinary site from the canary
+client before cancelling the independent rollback timer.
+
 ## Source container was restarted or recreated
 
 When the systemd recovery timer is enabled, wait up to two minutes and check
