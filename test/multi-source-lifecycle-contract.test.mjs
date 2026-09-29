@@ -24,6 +24,12 @@ test('schema 3 refreshes private data before apply and verifies freshness', () =
   assert.match(lifecycle, /mktemp -d \/tmp\/vpn-router-data/);
 });
 
+test('multi-source preflight avoids collisions with active project tables', () => {
+  const validation = lifecycle.slice(lifecycle.indexOf('render_artifacts()'), lifecycle.indexOf('preflight()'));
+  assert.equal((validation.match(/unshare --net nft -c -f/g) ?? []).length, 2);
+  assert.doesNotMatch(validation, /group_exec[^\n]*nft -c -f/);
+});
+
 test('multi-source enable arms rollback before applying namespace state', () => {
   const apply = lifecycle.slice(lifecycle.indexOf('apply_runtime()'), lifecycle.indexOf('status_runtime()'));
   assert.ok(apply.indexOf('capture_baseline') < apply.indexOf('write_manifest applying'));

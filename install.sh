@@ -137,7 +137,7 @@ EOF
 require_runtime() {
   local missing=()
   local required=(curl sha256sum tar xz)
-  if [[ "$runtime_check" == true ]]; then required+=(nft nsenter ip); fi
+  if [[ "$runtime_check" == true ]]; then required+=(nft nsenter unshare ip); fi
   for name in "${required[@]}"; do
     command -v "$name" >/dev/null 2>&1 || missing+=("$name")
   done

@@ -322,13 +322,14 @@ render_artifacts() {
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" "${nft_args[@]}" >"$dir/router.nft"
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-sing-box --config "$config_path" --source "$source_tag" >"$dir/sing-box.json"
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-dnsmasq --config "$config_path" >"$dir/dnsmasq.conf"
-    group_exec "$namespace" "$container" nft -c -f - <"$dir/router.nft"
+    # Validate replacement tables without colliding with the active table.
+    unshare --net nft -c -f - <"$dir/router.nft"
     docker run --rm --network none -v "$dir/sing-box.json:/config.json:ro" "$SING_BOX_IMAGE" check -c /config.json >/dev/null
     chmod 600 "$dir"/*
   done < <(groups_tsv)
   if udp_enabled; then
     "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-udp-egress --config "$config_path" >"$ARTIFACT_DIR/udp-egress.nft"
-    nft -c -f - <"$ARTIFACT_DIR/udp-egress.nft"
+    unshare --net nft -c -f - <"$ARTIFACT_DIR/udp-egress.nft"
     chmod 600 "$ARTIFACT_DIR/udp-egress.nft"
   fi
 }

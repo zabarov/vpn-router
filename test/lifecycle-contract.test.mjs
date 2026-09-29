@@ -25,6 +25,13 @@ test('managed apply fails immediately when a guarded runtime step fails', async 
   assert.doesNotMatch(source, /if ! \(\s*set -e[\s\S]*?compose up -d vpn-router-egress/);
 });
 
+test('preflight checks replacement nftables tables in an empty network namespace', async () => {
+  const source = await readFile(lifecyclePath, 'utf8');
+  const validation = source.slice(source.indexOf('validate_artifacts()'), source.indexOf('require_base_runtime()'));
+  assert.match(validation, /unshare --net nft -c -f/);
+  assert.doesNotMatch(validation, /source_exec nft -c -f/);
+});
+
 test('status reports drift instead of trusting an applied manifest alone', async () => {
   const source = await readFile(lifecyclePath, 'utf8');
   const statusStart = source.indexOf('status_command()');

@@ -15,6 +15,9 @@ All notable changes are documented here.
   and all UDP ports for selected regional destinations, without provider-specific
   port or CIDR lists. Existing narrow canary configurations remain valid. The
   all-client mode has passed an isolated packet-path lab, not live acceptance.
+- Validate replacement nftables tables in an isolated network namespace so
+  widening a live client set from one address to a subnet does not falsely fail
+  preflight on overlap with the table that apply will replace.
 - Do not redirect client DNS when a policy uses only server-resolved exact
   domains and no managed-DNS sidecar is started. This fixes a canary outage in
   which ordinary sites stopped resolving despite an otherwise healthy VPN.

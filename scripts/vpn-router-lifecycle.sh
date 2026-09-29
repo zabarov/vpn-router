@@ -319,7 +319,10 @@ validate_artifacts() {
   local destination=$1
   docker run --rm --network none -v "$destination/sing-box.json:/config.json:ro" \
     "$SING_BOX_IMAGE" check -c /config.json >/dev/null
-  source_exec nft -c -f - <"$destination/vpn-router.nft"
+  # Check in an empty network namespace. nft -c still validates set elements
+  # against an existing live table, so widening /32 to /24 would otherwise
+  # fail preflight even though apply replaces the project-owned table.
+  unshare --net nft -c -f - <"$destination/vpn-router.nft"
 }
 
 require_base_runtime() {
