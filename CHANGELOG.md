@@ -4,6 +4,13 @@ All notable changes are documented here.
 
 ## 0.6.0-alpha.1 - Unreleased
 
+- Add an experimental, opt-in UDP telephony canary for one tunnel source and a
+  managed Tailscale TUN exit, with isolated route/forward guards, an explicit
+  client return rule, and disposable packet-path tests. One live client passed
+  incoming and outgoing calls with two-way audio; exit-failure, excluded-client,
+  and restart acceptance remain open. Add explicit advanced setup options for
+  its client scope, provider CIDRs, and UDP ports. The ordinary routing switch
+  manages the UDP path together with TCP when this option is configured.
 - Do not redirect client DNS when a policy uses only server-resolved exact
   domains and no managed-DNS sidecar is started. This fixes a canary outage in
   which ordinary sites stopped resolving despite an otherwise healthy VPN.

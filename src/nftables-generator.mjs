@@ -3,7 +3,9 @@ import { normalizeConfig, policySources, sourceClientScope, sourceClientSetName,
 import { buildRuntimePlan } from './runtime-plan.mjs';
 
 export const CAPTURE_ROUTING_MARK = 0x5254;
+export const UDP_ROUTING_MARK = 0x5255;
 export const MANAGED_DNS_UID = 65534;
+export const UDP_SOURCE_INTERFACE = 'vrudp0';
 
 function setName(tag) {
   return `set_${tag.replaceAll('-', '_')}`;
@@ -57,6 +59,10 @@ function tunnelSelector(source, destinationSet) {
   return `iifname "${source.interface}" ip saddr @${sourceClientSetName(source)} ip daddr @${destinationSet}`;
 }
 
+function udpClientSetName(source) {
+  return `source_${source.tag.replaceAll('-', '_')}_udp_clients`;
+}
+
 export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
   const validation = validateConfig(input);
   if (!validation.valid) throw new Error(`Cannot generate an invalid configuration:\n- ${validation.errors.join('\n- ')}`);
@@ -76,6 +82,10 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
   for (const source of sources.filter((candidate) => candidate.type === 'tunnel_interface')) {
     const scope = sourceClientScope(source);
     lines.push(`  set ${sourceClientSetName(source)} { type ipv4_addr; flags interval; elements = { ${scope.cidrs.join(', ')} } }`);
+    if (source.udp_clients) {
+      const udpScope = sourceClientScope({ clients: source.udp_clients });
+      lines.push(`  set ${udpClientSetName(source)} { type ipv4_addr; flags interval; elements = { ${udpScope.cidrs.join(', ')} } }`);
+    }
   }
   for (const name of destinationSets) {
     const cidrs = config.destination_sets[name].ip_cidrs ?? [];
@@ -113,6 +123,12 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
         for (const nftSet of destinationNftSets(config, policy)) strictSelectors.push({ source, selector: tunnelSelector(source, nftSet) });
       }
     }
+    const udpConfig = config.traffic_handling.udp_routing;
+    const udpSource = udpConfig && tunnelSources.find((candidate) => candidate.tag === udpConfig.source);
+    const udpSelectors = udpSource ? udpConfig.destination_sets.flatMap((name) =>
+      destinationNftSets(config, { destination_sets: [name] }).map((nftSet) =>
+        `iifname "${udpSource.interface}" ip saddr @${udpClientSetName(udpSource)} ip daddr @${nftSet}`)) : [];
+    const udpPorts = udpConfig ? `{ ${udpConfig.destination_ports.join(', ')} }` : null;
     lines.push('  chain capture_redirect {');
     lines.push('    type nat hook prerouting priority dstnat; policy accept;');
     if (managedDns) {
@@ -127,11 +143,16 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
     lines.push('  chain prerouting_guard {');
     lines.push('    type filter hook prerouting priority mangle; policy accept;');
     for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
+    for (const selector of udpSelectors) lines.push(`    ${selector} udp dport ${udpPorts} meta mark set ${UDP_ROUTING_MARK} counter return`);
     for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto udp counter reject`);
     lines.push('  }');
     lines.push('  chain forward_guard {');
     lines.push('    type filter hook forward priority filter; policy accept;');
     for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
+    for (const selector of udpSelectors) {
+      lines.push(`    ${selector} udp dport ${udpPorts} meta mark ${UDP_ROUTING_MARK} oifname "${UDP_SOURCE_INTERFACE}" counter return`);
+      lines.push(`    ${selector} meta l4proto udp counter reject`);
+    }
     for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto tcp counter reject with tcp reset`);
     lines.push('  }');
   } else {

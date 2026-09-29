@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { normalizeConfig, policySources } from './config-normalizer.mjs';
+import { normalizeConfig, policySources, sourceClientScope } from './config-normalizer.mjs';
 
 const tagPattern = /^[a-z][a-z0-9-]{1,62}$/;
 const environmentNamePattern = /^[A-Z][A-Z0-9_]{2,127}$/;
@@ -17,7 +17,7 @@ const countryProviderFields = new Set(['type', 'refresh_interval', 'max_stale'])
 const domainResolverFields = new Set(['refresh_interval', 'min_ttl', 'max_ttl', 'max_stale']);
 const amneziaSourceFields = new Set(['tag', 'type', 'container_name', 'interface', 'client_subnet', 'client_scope']);
 const linuxSourceFields = new Set(['tag', 'type', 'interface', 'client_subnet', 'client_scope']);
-const tunnelSourceFields = new Set(['tag', 'type', 'namespace', 'container_name', 'interface', 'clients']);
+const tunnelSourceFields = new Set(['tag', 'type', 'namespace', 'container_name', 'interface', 'clients', 'udp_clients']);
 const containerEgressSourceFields = new Set(['tag', 'type', 'container_name', 'clients']);
 const clientScopeFields = new Set(['mode', 'addresses', 'subnet']);
 const directEgressFields = new Set(['tag', 'type']);
@@ -26,7 +26,8 @@ const socksEgressFields = new Set(['tag', 'type', 'server', 'port', 'healthcheck
 const interfaceEgressFields = new Set(['tag', 'type', 'interface', 'healthcheck_url']);
 const legacyPolicyFields = new Set(['tag', 'source', 'destination_sets', 'egress', 'failure_mode']);
 const policyFields = new Set(['tag', 'sources', 'destination_sets', 'egress', 'failure_mode']);
-const trafficHandlingFields = new Set(['udp_quic', 'ipv6', 'dns_mode']);
+const trafficHandlingFields = new Set(['udp_quic', 'ipv6', 'dns_mode', 'udp_routing']);
+const udpRoutingFields = new Set(['mode', 'source', 'destination_sets', 'destination_ports']);
 const resourceFields = new Set(['nftables_table', 'service_name']);
 
 function isObject(value) {
@@ -80,6 +81,15 @@ function isCanonicalIpv4Subnet(value) {
   const numeric = address.split('.').reduce((result, octet) => ((result << 8) | Number(octet)) >>> 0, 0);
   const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
   return (numeric & mask) === numeric;
+}
+
+function cidrContains(parent, child) {
+  const [parentAddress, parentPrefix] = parent.split('/');
+  const [childAddress, childPrefix] = child.split('/');
+  if (Number(parentPrefix) > Number(childPrefix)) return false;
+  const numeric = (address) => address.split('.').reduce((value, octet) => ((value << 8) | Number(octet)) >>> 0, 0);
+  const mask = Number(parentPrefix) === 0 ? 0 : (0xffffffff << (32 - Number(parentPrefix))) >>> 0;
+  return (numeric(parentAddress) & mask) === (numeric(childAddress) & mask);
 }
 
 function validateClientScope(source, errors) {
@@ -144,6 +154,12 @@ function validExactDomain(value) {
 
 function validDuration(value) {
   return typeof value === 'string' && /^[1-9][0-9]*(?:m|h|d)$/.test(value);
+}
+
+function validPortRange(value) {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,4}(?:-[1-9][0-9]{0,4})?$/.test(value)) return false;
+  const [first, last = first] = value.split('-').map(Number);
+  return first <= last && last <= 65535;
 }
 
 function durationMinutes(value) {
@@ -418,6 +434,61 @@ export function validateConfig(input) {
     const hasStrictDomains = strictPolicies.some((policy) => (policy.destination_sets ?? []).some((name) => name !== 'default' && (config.destination_sets?.[name]?.domain_suffixes ?? []).length > 0));
     if (hasStrictDomains && handling.dns_mode !== 'managed') {
       errors.push('strict domain policies require traffic_handling.dns_mode managed');
+    }
+    if (handling.udp_routing !== undefined) {
+      const udp = handling.udp_routing;
+      if (config.schema_version !== '3.0') errors.push('traffic_handling.udp_routing requires schema_version 3.0');
+      if (!isObject(udp)) errors.push('traffic_handling.udp_routing must be an object');
+      else {
+        rejectUnknownKeys(udp, udpRoutingFields, 'traffic_handling.udp_routing', errors);
+        if (udp.mode !== 'tailscale_tun') errors.push('traffic_handling.udp_routing.mode must be tailscale_tun');
+        const source = config.sources.find((candidate) => candidate.tag === udp.source);
+        if (!source || source.type !== 'tunnel_interface' || source.namespace !== 'container') {
+          errors.push('traffic_handling.udp_routing.source must identify one container tunnel_interface');
+        } else {
+          if (source.udp_clients === undefined) errors.push('UDP routing source requires an explicit udp_clients scope');
+          else {
+            validateClientScope({ tag: source.tag, type: source.type, clients: source.udp_clients }, errors);
+            if (source.udp_clients.mode !== 'address_list') errors.push('UDP routing requires udp_clients.mode address_list with explicit /32 addresses');
+            if (isObject(source.udp_clients) && (source.udp_clients.mode === 'address_list' || source.udp_clients.mode === 'subnet')) {
+              const parentCidrs = sourceClientScope(source).cidrs;
+              const udpCidrs = sourceClientScope({ clients: source.udp_clients }).cidrs;
+              for (const cidr of udpCidrs.filter(validIpv4Cidr)) {
+                if (!parentCidrs.some((parent) => validIpv4Cidr(parent) && cidrContains(parent, cidr))) {
+                  errors.push(`UDP client scope ${cidr} must be within source ${source.tag} clients`);
+                }
+              }
+            }
+          }
+        }
+        for (const other of config.sources.filter((candidate) => candidate.udp_clients !== undefined && candidate.tag !== udp.source)) {
+          errors.push(`source ${other.tag} declares udp_clients but is not the UDP routing source`);
+        }
+        if (!Array.isArray(udp.destination_sets) || udp.destination_sets.length === 0 ||
+            udp.destination_sets.some((name) => name === 'default' || !Object.hasOwn(config.destination_sets ?? {}, name))) {
+          errors.push('traffic_handling.udp_routing.destination_sets must name non-default destination sets');
+        } else {
+          rejectDuplicates(udp.destination_sets, 'traffic_handling.udp_routing.destination_sets', errors);
+          for (const name of udp.destination_sets) {
+            if (!strictPolicy?.destination_sets?.includes(name)) errors.push(`UDP destination set ${name} must belong to the strict policy`);
+          }
+        }
+        if (!Array.isArray(udp.destination_ports) || udp.destination_ports.length === 0 ||
+            udp.destination_ports.some((port) => !validPortRange(port))) {
+          errors.push('traffic_handling.udp_routing.destination_ports must contain valid UDP port or port-range strings');
+        } else {
+          rejectDuplicates(udp.destination_ports, 'traffic_handling.udp_routing.destination_ports', errors);
+          if (udp.destination_ports.some((entry) => {
+            const [first, last = first] = entry.split('-').map(Number);
+            return first <= 443 && last >= 443;
+          })) errors.push('traffic_handling.udp_routing must not include UDP/443 while QUIC is rejected');
+        }
+        if (activeStrictEgress?.type !== 'tailscale_socks') errors.push('UDP routing currently requires a managed Tailscale strict egress');
+      }
+    } else {
+      for (const source of config.sources.filter((candidate) => candidate.udp_clients !== undefined)) {
+        errors.push(`source ${source.tag} cannot declare udp_clients without traffic_handling.udp_routing`);
+      }
     }
   }
 

@@ -261,3 +261,54 @@ test('wizard creates country, exact-domain, and higher-priority direct overrides
   assert.equal(config.policies[0].tag, 'always-direct');
   assert.deepEqual(config.destination_sets['direct-overrides'].ip_cidrs, ['198.51.100.0/24']);
 });
+
+test('explicit UDP options generate an opt-in canary alongside normal TCP routing', () => {
+  const values = parseArgs([
+    '--source-container', 'vpn-source', '--source-interface', 'awg0',
+    '--client-scope', 'subnet', '--client-subnet', '10.42.0.0/24',
+    '--udp-source-container', 'vpn-source',
+    '--udp-client-addresses', '10.42.0.2/32',
+    '--udp-destination-cidrs', '198.51.100.0/24',
+    '--udp-destination-ports', '5060,10000-50000'
+  ]);
+  const config = buildConfig(values);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  assert.deepEqual(config.sources[0].udp_clients.addresses, ['10.42.0.2/32']);
+  assert.deepEqual(config.destination_sets['udp-provider'].ip_cidrs, ['198.51.100.0/24']);
+  assert.deepEqual(config.traffic_handling.udp_routing.destination_ports, ['5060', '10000-50000']);
+  assert.deepEqual(config.policies[0].destination_sets, ['strict-destinations', 'udp-provider']);
+});
+
+test('setup shortcut writes an opt-in UDP configuration without enabling routing', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'vpn-router-udp-setup-'));
+  const output = join(directory, 'router.yaml');
+  try {
+    const result = spawnSync(commandPath.pathname, [
+      'setup', '--non-interactive', '--output', output,
+      '--source-container', 'vpn-source', '--source-interface', 'awg0',
+      '--client-scope', 'subnet', '--client-subnet', '10.42.0.0/24',
+      '--exit-node', 'exit.example.ts.net', '--countries', 'RU',
+      '--udp-source-container', 'vpn-source',
+      '--udp-client-addresses', '10.42.0.2/32',
+      '--udp-destination-cidrs', '198.51.100.0/24',
+      '--udp-destination-ports', '5060,10000-50000'
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const config = parse(await readFile(output, 'utf8'));
+    assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+    assert.equal(config.traffic_handling.udp_routing.source, 'tunnel-1');
+    assert.equal((await stat(output)).mode & 0o777, 0o600);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('UDP setup rejects partial options and unsupported egresses', () => {
+  assert.throws(() => buildConfig(parseArgs(['--udp-client-addresses', '10.42.0.2/32'])), /requires --udp-source-container/);
+  const options = [
+    '--udp-source-container', 'vpn-source', '--udp-client-addresses', '10.42.0.2/32',
+    '--udp-destination-cidrs', '198.51.100.0/24', '--udp-destination-ports', '5060'
+  ];
+  assert.throws(() => buildConfig(parseArgs([...options, '--egress-type', 'socks5'])), /requires a managed Tailscale egress/);
+  assert.throws(() => buildConfig(parseArgs([...options, '--udp-source-container', 'missing'])), /must identify one selected container tunnel source/);
+});

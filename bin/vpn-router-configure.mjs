@@ -27,6 +27,10 @@ const defaults = {
   exactDomains: '',
   directDomains: '',
   directCidrs: '',
+  udpSourceContainer: '',
+  udpClientAddresses: '',
+  udpDestinationCidrs: '',
+  udpDestinationPorts: '',
   serviceName: 'vpn-router',
   nftablesTable: 'vpn_router',
   preset: null,
@@ -56,6 +60,10 @@ const optionMap = new Map([
   ['--exact-domains', 'exactDomains'],
   ['--direct-domains', 'directDomains'],
   ['--direct-cidrs', 'directCidrs'],
+  ['--udp-source-container', 'udpSourceContainer'],
+  ['--udp-client-addresses', 'udpClientAddresses'],
+  ['--udp-destination-cidrs', 'udpDestinationCidrs'],
+  ['--udp-destination-ports', 'udpDestinationPorts'],
   ['--service-name', 'serviceName'],
   ['--nftables-table', 'nftablesTable'],
   ['--preset', 'preset']
@@ -87,6 +95,10 @@ Options:
   --exact-domains <domain,domain>
   --direct-domains <domain,domain>
   --direct-cidrs <cidr,cidr>
+  --udp-source-container <name> (advanced, opt-in Tailscale TUN)
+  --udp-client-addresses <client/32,client/32>
+  --udp-destination-cidrs <provider-cidr,provider-cidr>
+  --udp-destination-ports <port,first-last>
   --service-name <name>
   --nftables-table <name>
   --non-interactive
@@ -294,6 +306,22 @@ export function buildConfig(values) {
     return source;
   });
 
+  const udpFields = ['udpSourceContainer', 'udpClientAddresses', 'udpDestinationCidrs', 'udpDestinationPorts'];
+  const udpRequested = udpFields.some((field) => values.provided.has(field));
+  if (udpRequested && udpFields.some((field) => !values.provided.has(field) || !values[field].trim())) {
+    throw new Error('UDP routing requires --udp-source-container, --udp-client-addresses, --udp-destination-cidrs, and --udp-destination-ports together.');
+  }
+  if (udpRequested && values.egressType !== 'tailscale_socks') {
+    throw new Error('UDP routing requires a managed Tailscale egress.');
+  }
+  const udpSource = udpRequested ? sources.find((source) => source.type === 'tunnel_interface' && source.namespace === 'container' && source.container_name === values.udpSourceContainer) : undefined;
+  if (udpRequested && !udpSource) {
+    throw new Error('UDP source container must identify one selected container tunnel source.');
+  }
+  if (udpSource) {
+    udpSource.udp_clients = { mode: 'address_list', addresses: commaList(values.udpClientAddresses) };
+  }
+
   let strictEgress;
   if (values.egressType === 'tailscale_socks') {
     strictEgress = {
@@ -328,6 +356,7 @@ export function buildConfig(values) {
     domain_suffixes: commaList(values.domains),
     ip_cidrs: []
   };
+  const udpDestination = udpRequested ? { ip_cidrs: commaList(values.udpDestinationCidrs) } : undefined;
   const directDestination = {
     exact_domains: commaList(values.directDomains),
     ip_cidrs: commaList(values.directCidrs)
@@ -336,7 +365,7 @@ export function buildConfig(values) {
   const policies = [];
   if (hasDirectOverrides) policies.push({ tag: 'always-direct', sources: sources.map((source) => source.tag), destination_sets: ['direct-overrides'], egress: 'direct', failure_mode: 'direct' });
   policies.push(
-    { tag: 'strict-destinations', sources: sources.map((source) => source.tag), destination_sets: ['strict-destinations'], egress: 'strict-egress', failure_mode: 'block' },
+    { tag: 'strict-destinations', sources: sources.map((source) => source.tag), destination_sets: ['strict-destinations', ...(udpRequested ? ['udp-provider'] : [])], egress: 'strict-egress', failure_mode: 'block' },
     { tag: 'default-direct', sources: sources.map((source) => source.tag), destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
   );
   return {
@@ -351,9 +380,16 @@ export function buildConfig(values) {
     policies,
     destination_sets: {
       'strict-destinations': strictDestination,
+      ...(udpRequested ? { 'udp-provider': udpDestination } : {}),
       ...(hasDirectOverrides ? { 'direct-overrides': directDestination } : {})
     },
-    traffic_handling: { udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed' },
+    traffic_handling: {
+      udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed',
+      ...(udpRequested ? { udp_routing: {
+        mode: 'tailscale_tun', source: udpSource.tag,
+        destination_sets: ['udp-provider'], destination_ports: commaList(values.udpDestinationPorts)
+      } } : {})
+    },
     resources: { nftables_table: values.nftablesTable, service_name: values.serviceName }
   };
 }

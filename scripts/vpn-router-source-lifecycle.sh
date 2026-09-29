@@ -82,7 +82,9 @@ EGRESS_NAME=$(json_value egress_name)
 CONTROL_NETWORK=$(json_value control_network)
 PROXY_NETWORK=$(json_value proxy_network)
 MANAGED_DNS=$(json_value managed_dns)
-readonly SERVICE_NAME NFTABLES_TABLE STRICT_EGRESS_TYPE EGRESS_NAME CONTROL_NETWORK PROXY_NETWORK MANAGED_DNS
+UDP_ROUTING_MODE=$(json_value udp_routing.mode)
+UDP_SOURCE_CONTAINER=$(json_value udp_routing.container_name)
+readonly SERVICE_NAME NFTABLES_TABLE STRICT_EGRESS_TYPE EGRESS_NAME CONTROL_NETWORK PROXY_NETWORK MANAGED_DNS UDP_ROUTING_MODE UDP_SOURCE_CONTAINER
 readonly STATE_ROOT="/var/lib/$SERVICE_NAME"
 readonly RUNTIME_DIR="$STATE_ROOT/runtime"
 readonly ARTIFACT_DIR="$RUNTIME_DIR/artifacts"
@@ -93,6 +95,52 @@ readonly EGRESS_STATE="$STATE_ROOT/egress-tailscale"
 readonly DATA_STATE="$STATE_ROOT/data/state.json"
 readonly EGRESS_PROXY_IP_FILE="$RUNTIME_DIR/tailscale-proxy-ip"
 readonly DEADMAN_UNIT="${SERVICE_NAME}-deadman"
+readonly UDP_SOURCE_INTERFACE='vrudp0'
+readonly UDP_EGRESS_INTERFACE='vrudp1'
+readonly UDP_SOURCE_ADDRESS='169.254.253.0/31'
+readonly UDP_EGRESS_ADDRESS='169.254.253.1/31'
+readonly UDP_ROUTE_TABLE=5255
+readonly UDP_ROUTE_PRIORITY=110
+readonly UDP_ROUTE_MARK=21077
+readonly UDP_EGRESS_PROXY_PRIORITY=490
+readonly UDP_EGRESS_RETURN_PRIORITY=500
+readonly UDP_EGRESS_NFT_TABLE='vpn_router_udp'
+
+udp_enabled() { [[ "$UDP_ROUTING_MODE" == tailscale_tun ]]; }
+udp_source_exec() { group_exec container "$UDP_SOURCE_CONTAINER" "$@"; }
+udp_egress_exec() { group_exec container "$EGRESS_NAME" "$@"; }
+udp_proxy_subnet() { docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$PROXY_NETWORK"; }
+udp_source_rule_exists() {
+  udp_source_exec ip -j -4 rule show | "$node_bin" -e '
+    let input="";
+    process.stdin.on("data", chunk => input += chunk).on("end", () => {
+      try {
+        const found = JSON.parse(input).some(rule =>
+          rule.priority === Number(process.argv[1]) &&
+          String(rule.table) === process.argv[2] &&
+          String(rule.fwmark).toLowerCase() === process.argv[3]);
+        process.exit(found ? 0 : 1);
+      } catch { process.exit(1); }
+    });
+  ' "$UDP_ROUTE_PRIORITY" "$UDP_ROUTE_TABLE" "0x$(printf '%x' "$UDP_ROUTE_MARK")"
+}
+udp_egress_rule_exists() {
+  local priority=$1 cidr=$2
+  udp_egress_exec ip -j -4 rule show | "$node_bin" -e '
+    let input="";
+    process.stdin.on("data", chunk => input += chunk).on("end", () => {
+      try {
+        const [address, length] = process.argv[2].split("/");
+        const found = JSON.parse(input).some(rule =>
+          rule.priority === Number(process.argv[1]) &&
+          rule.table === "main" &&
+          rule.dst === address &&
+          Number(rule.dstlen ?? 32) === Number(length));
+        process.exit(found ? 0 : 1);
+      } catch { process.exit(1); }
+    });
+  ' "$priority" "$cidr"
+}
 
 groups_tsv() {
   "$node_bin" -e '
@@ -278,6 +326,11 @@ render_artifacts() {
     docker run --rm --network none -v "$dir/sing-box.json:/config.json:ro" "$SING_BOX_IMAGE" check -c /config.json >/dev/null
     chmod 600 "$dir"/*
   done < <(groups_tsv)
+  if udp_enabled; then
+    "$node_bin" "$repo_dir/bin/vpn-router.mjs" render-udp-egress --config "$config_path" >"$ARTIFACT_DIR/udp-egress.nft"
+    nft -c -f - <"$ARTIFACT_DIR/udp-egress.nft"
+    chmod 600 "$ARTIFACT_DIR/udp-egress.nft"
+  fi
 }
 
 preflight() {
@@ -332,6 +385,16 @@ preflight() {
     auth_env=$(json_value strict_egress.auth_key_env); auth_value=${!auth_env-}
     [[ -n "$auth_value" || -s "$EGRESS_STATE/tailscaled.state" ]] || { echo "preflight=FAIL: $auth_env is required for first enrollment" >&2; return 1; }
   fi
+  if udp_enabled; then
+    [[ -c /dev/net/tun ]] || { echo 'preflight=FAIL: UDP routing requires /dev/net/tun' >&2; return 1; }
+    if [[ "$managed_active" != true ]]; then
+      ! ip link show "$UDP_SOURCE_INTERFACE" >/dev/null 2>&1 || { echo 'preflight=FAIL: UDP source interface name is occupied on the host' >&2; return 1; }
+      ! ip link show "$UDP_EGRESS_INTERFACE" >/dev/null 2>&1 || { echo 'preflight=FAIL: UDP egress interface name is occupied on the host' >&2; return 1; }
+      ! udp_source_exec ip link show "$UDP_SOURCE_INTERFACE" >/dev/null 2>&1 || { echo 'preflight=FAIL: UDP source interface name is occupied' >&2; return 1; }
+      ! udp_source_exec ip rule show | grep -Eq "(^| )${UDP_ROUTE_PRIORITY}:" || { echo 'preflight=FAIL: UDP route priority is occupied' >&2; return 1; }
+      [[ -z $(udp_source_exec ip route show table "$UDP_ROUTE_TABLE") ]] || { echo 'preflight=FAIL: UDP route table is occupied' >&2; return 1; }
+    fi
+  fi
   mkdir -p "$RUNTIME_DIR" "$ARTIFACT_DIR"; chmod 700 "$STATE_ROOT" "$RUNTIME_DIR" "$ARTIFACT_DIR"
   docker image inspect "$DNS_IMAGE" >/dev/null 2>&1 || docker build -q -t "$DNS_IMAGE" "$repo_dir/deploy/dnsmasq" >/dev/null
   local preflight_data='' preflight_data_dir=''
@@ -362,17 +425,21 @@ wait_tailscale_ready() {
 
 start_egress() {
   [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]] || return 0
-  local exit_node proxy_port auth_env auth_value publish=()
+  local exit_node proxy_port auth_env auth_value publish=() tun_args=() userspace=true
   exit_node=$(json_value strict_egress.exit_node); proxy_port=$(json_value strict_egress.proxy_port)
   auth_env=$(json_value strict_egress.auth_key_env); auth_value=${!auth_env-}
   docker network create --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" "$CONTROL_NETWORK" >/dev/null
   docker network create --internal --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" "$PROXY_NETWORK" >/dev/null
+  if udp_enabled; then
+    userspace=false
+    tun_args=(--cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun --sysctl net.ipv4.ip_forward=1)
+  fi
   groups_tsv | awk -F '\t' '$2=="host"{found=1} END{exit !found}' && publish=(-p "127.0.0.1:$proxy_port:$proxy_port")
   docker run -d --name "$EGRESS_NAME" --hostname "$EGRESS_NAME" --restart unless-stopped \
-    --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" --cap-drop ALL --security-opt no-new-privileges:true \
+    --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" --cap-drop ALL "${tun_args[@]}" --security-opt no-new-privileges:true \
     --network "$CONTROL_NETWORK" "${publish[@]}" -v "$EGRESS_STATE:/var/lib/tailscale" \
     -e "TS_AUTHKEY=$auth_value" -e "TS_EXTRA_ARGS=--exit-node=$exit_node --exit-node-allow-lan-access=false --accept-routes=false --accept-dns=false" \
-    -e TS_STATE_DIR=/var/lib/tailscale -e TS_USERSPACE=true -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
+    -e TS_STATE_DIR=/var/lib/tailscale -e "TS_USERSPACE=$userspace" -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
   docker network connect --gw-priority -1 --alias "$EGRESS_NAME" "$PROXY_NETWORK" "$EGRESS_NAME"
   if ! wait_tailscale_ready; then
     echo 'enable=FAIL: managed Tailscale egress did not become ready before auth-key scrubbing' >&2
@@ -382,16 +449,112 @@ start_egress() {
     docker rm -f "$EGRESS_NAME" >/dev/null
     auth_value=''; unset "$auth_env" || true
     docker run -d --name "$EGRESS_NAME" --hostname "$EGRESS_NAME" --restart unless-stopped \
-      --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" --cap-drop ALL --security-opt no-new-privileges:true \
+      --label "io.github.rim.vpn-router.owner=$SERVICE_NAME" --cap-drop ALL "${tun_args[@]}" --security-opt no-new-privileges:true \
       --network "$CONTROL_NETWORK" "${publish[@]}" -v "$EGRESS_STATE:/var/lib/tailscale" \
       -e TS_AUTHKEY= -e "TS_EXTRA_ARGS=--exit-node=$exit_node --exit-node-allow-lan-access=false --accept-routes=false --accept-dns=false" \
-      -e TS_STATE_DIR=/var/lib/tailscale -e TS_USERSPACE=true -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
+      -e TS_STATE_DIR=/var/lib/tailscale -e "TS_USERSPACE=$userspace" -e "TS_SOCKS5_SERVER=0.0.0.0:$proxy_port" -e TS_AUTH_ONCE=true "$TAILSCALE_IMAGE" >/dev/null
     docker network connect --gw-priority -1 --alias "$EGRESS_NAME" "$PROXY_NETWORK" "$EGRESS_NAME"
     if ! wait_tailscale_ready; then
       echo 'enable=FAIL: managed Tailscale egress did not recover after auth-key scrubbing' >&2
       return 1
     fi
   fi
+  if udp_enabled; then
+    udp_egress_exec ip link show tailscale0 >/dev/null
+  fi
+}
+
+stop_udp_link() {
+  udp_enabled || return 0
+  local stored_id current_id source_tag cidr proxy_subnet
+  source_tag=$(json_value udp_routing.source)
+  stored_id=$(awk -F= -v tag="$source_tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv" 2>/dev/null || true)
+  current_id=$(docker inspect -f '{{.Id}}' "$UDP_SOURCE_CONTAINER" 2>/dev/null || true)
+  if container_running "$UDP_SOURCE_CONTAINER" && [[ -z "$stored_id" || "$stored_id" == "$current_id" ]]; then
+    udp_source_exec ip rule del priority "$UDP_ROUTE_PRIORITY" 2>/dev/null || true
+    udp_source_exec ip route flush table "$UDP_ROUTE_TABLE" 2>/dev/null || true
+    udp_source_exec ip link del "$UDP_SOURCE_INTERFACE" 2>/dev/null || true
+  fi
+  if container_running "$EGRESS_NAME"; then
+    proxy_subnet=$(udp_proxy_subnet 2>/dev/null || true)
+    [[ -z "$proxy_subnet" ]] || udp_egress_exec ip rule del to "$proxy_subnet" priority "$UDP_EGRESS_PROXY_PRIORITY" 2>/dev/null || true
+    while IFS= read -r cidr; do
+      [[ -n "$cidr" ]] || continue
+      udp_egress_exec ip rule del to "$cidr" priority "$UDP_EGRESS_RETURN_PRIORITY" 2>/dev/null || true
+    done < <("$node_bin" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const cidr of p.udp_routing.client_cidrs) console.log(cidr)' "$plan_tmp")
+    udp_egress_exec nft delete table inet "$UDP_EGRESS_NFT_TABLE" 2>/dev/null || true
+    udp_egress_exec ip link del "$UDP_EGRESS_INTERFACE" 2>/dev/null || true
+  fi
+}
+
+udp_link_healthy() {
+  udp_enabled || return 0
+  local cidr proxy_subnet source_proxy_ip
+  udp_source_exec ip link show "$UDP_SOURCE_INTERFACE" >/dev/null 2>&1 || { echo 'udp_link=FAIL:source_interface_missing' >&2; return 1; }
+  udp_source_rule_exists || { echo 'udp_link=FAIL:source_policy_rule_missing' >&2; return 1; }
+  udp_source_exec ip route show table "$UDP_ROUTE_TABLE" | grep -Fq "default via 169.254.253.1 dev $UDP_SOURCE_INTERFACE" || { echo 'udp_link=FAIL:source_policy_route_missing' >&2; return 1; }
+  udp_egress_exec ip link show "$UDP_EGRESS_INTERFACE" >/dev/null 2>&1 || { echo 'udp_link=FAIL:egress_interface_missing' >&2; return 1; }
+  udp_egress_exec ip -o link show dev "$UDP_EGRESS_INTERFACE" | grep -Eq ',UP(,|>)' || { echo 'udp_link=FAIL:egress_interface_down' >&2; return 1; }
+  udp_source_exec ip -o link show dev "$UDP_SOURCE_INTERFACE" | grep -Eq ',UP(,|>)' || { echo 'udp_link=FAIL:source_interface_down' >&2; return 1; }
+  udp_egress_exec ip -o link show dev tailscale0 | grep -Eq ',UP(,|>)' || { echo 'udp_link=FAIL:tailscale_interface_down' >&2; return 1; }
+  udp_egress_exec nft list table inet "$UDP_EGRESS_NFT_TABLE" >/dev/null 2>&1 || { echo 'udp_link=FAIL:egress_guard_missing' >&2; return 1; }
+  proxy_subnet=$(udp_proxy_subnet) || { echo 'udp_link=FAIL:proxy_subnet_missing' >&2; return 1; }
+  source_proxy_ip=$(docker inspect -f "{{with index .NetworkSettings.Networks \"$PROXY_NETWORK\"}}{{.IPAddress}}{{end}}" "$UDP_SOURCE_CONTAINER") || { echo 'udp_link=FAIL:source_proxy_address_missing' >&2; return 1; }
+  [[ -n "$source_proxy_ip" ]] || { echo 'udp_link=FAIL:source_proxy_address_empty' >&2; return 1; }
+  udp_egress_rule_exists "$UDP_EGRESS_PROXY_PRIORITY" "$proxy_subnet" || { echo 'udp_link=FAIL:proxy_return_rule_missing' >&2; return 1; }
+  udp_egress_exec ip -4 route get "$source_proxy_ip" | grep -Fq 'dev eth' || { echo 'udp_link=FAIL:proxy_return_route_wrong' >&2; return 1; }
+  while IFS= read -r cidr; do
+    [[ -n "$cidr" ]] || continue
+    udp_egress_exec ip route show "$cidr" | grep -Fq "via 169.254.253.0 dev $UDP_EGRESS_INTERFACE" || { echo 'udp_link=FAIL:client_return_route_missing' >&2; return 1; }
+    udp_egress_rule_exists "$UDP_EGRESS_RETURN_PRIORITY" "$cidr" || { echo 'udp_link=FAIL:client_return_rule_missing' >&2; return 1; }
+    udp_egress_exec ip -4 route get "${cidr%/*}" | grep -Fq "dev $UDP_EGRESS_INTERFACE" || { echo 'udp_link=FAIL:client_return_route_wrong' >&2; return 1; }
+  done < <("$node_bin" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const cidr of p.udp_routing.client_cidrs) console.log(cidr)' "$plan_tmp")
+}
+
+start_udp_link() {
+  udp_enabled || return 0
+  local source_pid egress_pid cidr proxy_subnet
+  source_pid=$(docker inspect -f '{{.State.Pid}}' "$UDP_SOURCE_CONTAINER")
+  egress_pid=$(docker inspect -f '{{.State.Pid}}' "$EGRESS_NAME")
+  udp_egress_exec ip link show tailscale0 >/dev/null
+  ip link add "$UDP_SOURCE_INTERFACE" type veth peer name "$UDP_EGRESS_INTERFACE"
+  ip link set "$UDP_SOURCE_INTERFACE" netns "$source_pid"
+  ip link set "$UDP_EGRESS_INTERFACE" netns "$egress_pid"
+  udp_source_exec ip addr add "$UDP_SOURCE_ADDRESS" dev "$UDP_SOURCE_INTERFACE"
+  udp_egress_exec ip addr add "$UDP_EGRESS_ADDRESS" dev "$UDP_EGRESS_INTERFACE"
+  udp_source_exec ip link set "$UDP_SOURCE_INTERFACE" up
+  udp_egress_exec ip link set "$UDP_EGRESS_INTERFACE" up
+  proxy_subnet=$(udp_proxy_subnet)
+  [[ "$proxy_subnet" =~ ^([0-9]{1,3}[.]){3}[0-9]{1,3}/[0-9]{1,2}$ ]] || { echo 'enable=FAIL: project proxy network has no IPv4 subnet' >&2; return 1; }
+  ! udp_egress_exec ip rule show | grep -Eq "(^| )${UDP_EGRESS_PROXY_PRIORITY}:" || { echo 'enable=FAIL: UDP egress proxy-rule priority is occupied' >&2; return 1; }
+  ! udp_egress_exec ip rule show | grep -Eq "(^| )${UDP_EGRESS_RETURN_PRIORITY}:" || { echo 'enable=FAIL: UDP egress return-rule priority is occupied' >&2; return 1; }
+  udp_egress_exec ip rule add to "$proxy_subnet" lookup main priority "$UDP_EGRESS_PROXY_PRIORITY"
+  while IFS= read -r cidr; do
+    [[ -n "$cidr" ]] || continue
+    udp_egress_exec ip route replace "$cidr" via 169.254.253.0 dev "$UDP_EGRESS_INTERFACE"
+    udp_egress_exec ip rule add to "$cidr" lookup main priority "$UDP_EGRESS_RETURN_PRIORITY"
+  done < <("$node_bin" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const cidr of p.udp_routing.client_cidrs) console.log(cidr)' "$plan_tmp")
+  udp_egress_exec nft -f - <"$ARTIFACT_DIR/udp-egress.nft"
+  udp_source_exec ip route replace table "$UDP_ROUTE_TABLE" default via 169.254.253.1 dev "$UDP_SOURCE_INTERFACE"
+  udp_source_exec ip rule add fwmark "$UDP_ROUTE_MARK" lookup "$UDP_ROUTE_TABLE" priority "$UDP_ROUTE_PRIORITY"
+  # Tailscale can reconfigure policy routing after the new veth is observed.
+  # Re-establish only our return rule while the network settles, then require
+  # two consecutive healthy checks before exposing the UDP path as ready.
+  local attempt stable=false
+  for ((attempt=0; attempt<6; attempt++)); do
+    if udp_link_healthy >/dev/null 2>&1; then
+      sleep 2
+      if udp_link_healthy >/dev/null 2>&1; then stable=true; break; fi
+    fi
+    while IFS= read -r cidr; do
+      [[ -n "$cidr" ]] || continue
+      if ! udp_egress_rule_exists "$UDP_EGRESS_RETURN_PRIORITY" "$cidr"; then
+        udp_egress_exec ip rule add to "$cidr" lookup main priority "$UDP_EGRESS_RETURN_PRIORITY"
+      fi
+    done < <("$node_bin" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const cidr of p.udp_routing.client_cidrs) console.log(cidr)' "$plan_tmp")
+    sleep 2
+  done
+  [[ "$stable" == true ]] || udp_link_healthy
 }
 
 pin_tailscale_proxy_ip() {
@@ -481,6 +644,15 @@ capture_failure_diagnostics() {
   if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
     docker inspect "$EGRESS_NAME" >"$dir/egress.inspect.json" 2>&1 || true
     docker logs "$EGRESS_NAME" >"$dir/egress.log" 2>&1 || true
+    if udp_enabled && container_running "$EGRESS_NAME"; then
+      udp_egress_exec ip -j rule show >"$dir/egress-rules.json" 2>&1 || true
+      udp_egress_exec ip -j route show table main >"$dir/egress-main-routes.json" 2>&1 || true
+      udp_egress_exec ip -j route show table 52 >"$dir/egress-tailscale-routes.json" 2>&1 || true
+    fi
+  fi
+  if udp_enabled && container_running "$UDP_SOURCE_CONTAINER"; then
+    udp_source_exec ip -j -4 rule show >"$dir/source-rules.json" 2>&1 || true
+    udp_source_exec ip -j -4 route show table "$UDP_ROUTE_TABLE" >"$dir/source-udp-routes.json" 2>&1 || true
   fi
   chmod 600 "$dir"/*
   printf 'failure_evidence=%s\n' "$dir" >&2
@@ -494,6 +666,7 @@ verify_applied() {
   [[ "$MANIFEST_STATUS" == applied ]] || { echo "verify=FAIL: manifest status is $MANIFEST_STATUS" >&2; return 1; }
   verify_routing_data || { echo 'verify=FAIL: routing data is unavailable or stale' >&2; return 1; }
   [[ "$STRICT_EGRESS_TYPE" != tailscale_socks ]] || { container_running "$EGRESS_NAME" && owned_container "$EGRESS_NAME"; } || { echo 'verify=FAIL: managed egress is not running or not owned' >&2; return 1; }
+  udp_link_healthy || { echo 'verify=FAIL: UDP egress link, route, or guard is missing' >&2; return 1; }
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     if [[ "$namespace" == container ]]; then
       stored_id=$(awk -F= -v tag="$tag" '$1==tag{print $2}' "$RUNTIME_DIR/source-ids.tsv")
@@ -521,6 +694,10 @@ owned_absent() {
     ! docker inspect "$dns" >/dev/null 2>&1 || return 1
     ! group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >/dev/null 2>&1 || return 1
   done < <(groups_tsv)
+  if udp_enabled && container_running "$UDP_SOURCE_CONTAINER"; then
+    ! udp_source_exec ip link show "$UDP_SOURCE_INTERFACE" >/dev/null 2>&1 || return 1
+    ! udp_source_exec ip rule show | grep -Eq "(^| )${UDP_ROUTE_PRIORITY}:" || return 1
+  fi
   ! network_exists "$CONTROL_NETWORK" && ! network_exists "$PROXY_NETWORK"
 }
 
@@ -539,6 +716,7 @@ rollback_runtime() {
   # shellcheck disable=SC1090
   source "$MANIFEST"; backup=$MANIFEST_BACKUP_DIR
   if [[ "$MANIFEST_STATUS" =~ ^(disabled|rolled_back)$ ]] && owned_absent; then cancel_deadman; [[ "$command_name" == disable ]] && echo 'disable=ALREADY_DISABLED' || echo 'rollback=ALREADY_ROLLED_BACK'; return 0; fi
+  stop_udp_link
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
     if owned_container "$capture"; then docker rm -f "$capture" >/dev/null || true; fi
     if owned_container "$dns"; then docker rm -f "$dns" >/dev/null || true; fi
@@ -589,7 +767,9 @@ apply_runtime() {
   backup=$(capture_baseline)
   write_manifest applying "$backup"
   arm_deadman "$rollback_after"
-  if ! { start_egress; pin_tailscale_proxy_ip; attach_sources; while IFS=$'\t' read -r tag namespace container source_tag capture dns; do start_group "$tag" "$namespace" "$container" "$source_tag" "$capture" "$dns"; done < <(groups_tsv); }; then
+  # Install the source guard before creating the UDP route. Until the route is
+  # ready, its forward rule rejects selected packets instead of leaking direct.
+  if ! { start_egress; pin_tailscale_proxy_ip; attach_sources; while IFS=$'\t' read -r tag namespace container source_tag capture dns; do start_group "$tag" "$namespace" "$container" "$source_tag" "$capture" "$dns"; done < <(groups_tsv); start_udp_link; }; then
     capture_failure_diagnostics apply_failed
     rollback_runtime true || true
     echo 'enable=FAIL: runtime apply failed and rollback was attempted' >&2
@@ -662,6 +842,12 @@ repair_applied_runtime() {
     fi
   done < <(groups_tsv)
 
+  if udp_enabled && ! udp_link_healthy; then
+    stop_udp_link
+    start_udp_link
+    repaired=true
+  fi
+
   write_manifest applied "$backup"
   if ! verify_applied; then
     capture_failure_diagnostics reconcile_verification_failed
@@ -732,6 +918,9 @@ status_runtime() {
     require_manifest_match || ok=false
     if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
       container_running "$EGRESS_NAME" && owned_container "$EGRESS_NAME" || ok=false
+    fi
+    if udp_enabled; then
+      if udp_link_healthy; then echo 'udp_routing=healthy'; else echo 'udp_routing=drifted'; ok=false; fi
     fi
     [[ "$ok" == true ]] || { echo 'status_health=drifted'; return 1; }
     echo 'status_health=structurally_healthy'

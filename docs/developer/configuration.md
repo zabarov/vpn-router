@@ -160,3 +160,48 @@ vpn-router migrate-config --input old.yaml --output new.yaml
 The migration maps `amneziawg2_container` and `linux_interface` sources to the
 new `tunnel_interface` adapter and changes policy `source` fields to `sources`
 arrays.
+
+## Experimental UDP telephony canary
+
+The optional `traffic_handling.udp_routing` contract is for one containerized
+`tunnel_interface` source and the managed Tailscale egress only. It is not
+available for XRay/container-egress, an external SOCKS5 server, or a generic
+Linux interface. The default setup wizard does not enable it. The advanced
+`setup` command accepts `--udp-source-container`, `--udp-client-addresses`,
+`--udp-destination-cidrs`, and `--udp-destination-ports` together. The source's
+`udp_clients` must be an explicit address list inside its normal `clients`
+scope; begin with one `/32`.
+
+```yaml
+sources:
+  - tag: vpn-in
+    type: tunnel_interface
+    namespace: container
+    container_name: example-vpn
+    interface: wg0
+    clients:
+      mode: subnet
+      subnet: 10.42.0.0/24
+    udp_clients:
+      mode: address_list
+      addresses: [10.42.0.2/32]
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+  udp_routing:
+    mode: tailscale_tun
+    source: vpn-in
+    destination_sets: [voice-provider]
+    destination_ports: ["5060", "3478", "10000-50000"]
+```
+
+`voice-provider` must be part of the strict policy. Its `ip_cidrs` must come
+from the provider's current published signaling and media ranges. SIP proxy
+addresses alone do not prove that RTP media uses the same IPs; check the
+provider documentation and a real call. UDP/443 remains rejected to prevent
+QUIC bypass. The managed Tailscale container uses a TUN interface in this mode
+while retaining its SOCKS listener for TCP, so switching an existing runtime
+requires an outage-aware disable and re-enable. See the
+[canary procedure](../operations/udp-telephony-canary.md) and
+[generic example](../../examples/config.sip-udp.yaml).

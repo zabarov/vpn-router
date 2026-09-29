@@ -1,0 +1,63 @@
+schema_version: "3.0"
+
+sources:
+  - tag: vpn-in
+    type: tunnel_interface
+    namespace: container
+    container_name: example-vpn
+    interface: wg0
+    clients:
+      mode: subnet
+      subnet: 10.42.0.0/24
+    # Begin with one test client. Expand only after call and rollback tests.
+    udp_clients:
+      mode: address_list
+      addresses: [10.42.0.2/32]
+
+capture:
+  type: redirect
+  listen_port: 12345
+
+egresses:
+  - tag: direct
+    type: direct
+  - tag: regional-exit
+    type: tailscale_socks
+    auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
+    exit_node: exit-node.example.ts.net
+    proxy_server: vpn-router-egress
+    proxy_port: 1055
+    healthcheck_url: https://example.com/
+
+policies:
+  - tag: selected
+    sources: [vpn-in]
+    destination_sets: [regional, voice-provider]
+    egress: regional-exit
+    failure_mode: block
+  - tag: default-direct
+    sources: [vpn-in]
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  regional:
+    ip_cidrs: [203.0.113.0/24]
+  # Replace this documentation-only CIDR with provider-published media ranges.
+  voice-provider:
+    ip_cidrs: [198.51.100.0/24]
+
+traffic_handling:
+  udp_quic: reject
+  ipv6: reject
+  dns_mode: managed
+  udp_routing:
+    mode: tailscale_tun
+    source: vpn-in
+    destination_sets: [voice-provider]
+    destination_ports: ["5060", "10000-50000"]
+
+resources:
+  nftables_table: vpn_router
+  service_name: vpn-router

@@ -6,13 +6,14 @@ import { parseDocument, stringify } from 'yaml';
 import { validateConfig } from '../src/config-validator.mjs';
 import { generateSingBoxConfig } from '../src/sing-box-generator.mjs';
 import { generateNftablesConfig, generateNftablesDataUpdate } from '../src/nftables-generator.mjs';
+import { generateUdpEgressNft } from '../src/udp-egress-generator.mjs';
 import { generateDnsmasqConfig } from '../src/dnsmasq-generator.mjs';
 import { migrateConfig, normalizeConfig, sourceClientScope } from '../src/config-normalizer.mjs';
 import { buildRuntimePlan } from '../src/runtime-plan.mjs';
 import { assessRoutingDataState, defaultRoutingDataPath, readRoutingDataState, routingDataRequirements } from '../src/routing-data.mjs';
 
 function usage() {
-  return 'Usage: vpn-router <validate|render-dnsmasq|render-runtime-env|render-runtime-plan> --config <path>\n       vpn-router render-sing-box --config <path> [--source <tag>]\n       vpn-router render-nftables --config <path> [--source <tag>] [--routing-data <path>]\n       vpn-router <render-data-update|render-data-restore> --config <path> --routing-data <path>\n       vpn-router migrate-config --input <path> --output <path>';
+  return 'Usage: vpn-router <validate|render-dnsmasq|render-runtime-env|render-runtime-plan|render-udp-egress> --config <path>\n       vpn-router render-sing-box --config <path> [--source <tag>]\n       vpn-router render-nftables --config <path> [--source <tag>] [--routing-data <path>]\n       vpn-router <render-data-update|render-data-restore> --config <path> --routing-data <path>\n       vpn-router migrate-config --input <path> --output <path>';
 }
 
 function parseRenderOptions(args) {
@@ -49,7 +50,7 @@ async function main(argv) {
     return;
   }
   const command = argv[0];
-  if (!['validate', 'render-sing-box', 'render-nftables', 'render-data-update', 'render-data-restore', 'render-dnsmasq', 'render-runtime-env', 'render-runtime-plan'].includes(command)) {
+  if (!['validate', 'render-sing-box', 'render-nftables', 'render-data-update', 'render-data-restore', 'render-dnsmasq', 'render-runtime-env', 'render-runtime-plan', 'render-udp-egress'].includes(command)) {
     throw new Error(usage());
   }
   const options = parseRenderOptions(argv.slice(1));
@@ -98,6 +99,10 @@ async function main(argv) {
   }
   if (command === 'render-dnsmasq') {
     process.stdout.write(generateDnsmasqConfig(normalizeConfig(rawConfig)));
+    return;
+  }
+  if (command === 'render-udp-egress') {
+    process.stdout.write(generateUdpEgressNft(rawConfig));
     return;
   }
   if (command === 'render-runtime-plan') {

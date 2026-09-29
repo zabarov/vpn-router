@@ -123,3 +123,27 @@ test('refuses dynamic selectors without verified routing data', () => {
   hybrid.destination_sets['regional-services'] = { country_codes: ['RU'], ip_cidrs: [], domain_suffixes: [] };
   assert.throws(() => generateNftablesConfig(hybrid), /missing country prefixes/);
 });
+
+test('routes only an explicit UDP canary and provider set while rejecting other selected UDP', () => {
+  const udp = structuredClone(config);
+  udp.schema_version = '3.0';
+  udp.sources = [{
+    tag: 'amnezia-in', type: 'tunnel_interface', namespace: 'container',
+    container_name: 'amnezia-awg2', interface: 'awg0',
+    clients: { mode: 'subnet', subnet: '10.8.1.0/24' },
+    udp_clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] }
+  }];
+  udp.policies = config.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['amnezia-in'] }));
+  udp.policies[0].destination_sets.push('sip-provider');
+  udp.destination_sets['sip-provider'] = { ip_cidrs: ['198.51.100.0/24'] };
+  udp.traffic_handling.udp_routing = {
+    mode: 'tailscale_tun', source: 'amnezia-in',
+    destination_sets: ['sip-provider'], destination_ports: ['5060', '10000-50000']
+  };
+  const generated = generateNftablesConfig(udp);
+  assert.match(generated, /set source_amnezia_in_udp_clients \{ type ipv4_addr; flags interval; elements = \{ 10\.8\.1\.2\/32 \} \}/);
+  assert.match(generated, /ip saddr @source_amnezia_in_udp_clients ip daddr @set_sip_provider_static udp dport \{ 5060, 10000-50000 \} meta mark set 21077 counter return/);
+  assert.match(generated, /ip daddr @set_sip_provider_static udp dport \{ 5060, 10000-50000 \} meta mark 21077 oifname "vrudp0" counter return/);
+  assert.match(generated, /ip daddr @set_sip_provider_static meta l4proto udp counter reject/);
+  assert.match(generated, /ip saddr @source_amnezia_in_clients ip daddr @set_regional_services_static meta l4proto udp counter reject/);
+});

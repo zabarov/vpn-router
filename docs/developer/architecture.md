@@ -68,6 +68,19 @@ selected TCP that was not claimed. Selected UDP, including QUIC, is rejected.
 If sing-box or SOCKS is unavailable, the selected connection fails locally;
 unselected traffic never enters the capture process.
 
+Experimental UDP routing marks only an explicitly scoped tunnel client and
+selected destination IP/port pair. A separate policy route sends these packets
+over a project-owned veth to the managed Tailscale TUN namespace. An egress
+forward guard permits only `tailscale0`, with UDP masquerading there. The
+source forward guard rejects a marked packet if it cannot leave through the
+veth; a project-owned high-priority return rule keeps replies to the selected
+client on the veth even when Tailscale installs an exit-node default route.
+Another project-owned rule keeps the internal Docker proxy network reachable
+for the existing TCP SOCKS path without enabling general LAN bypass.
+The egress guard rejects the packet if Tailscale cannot carry it. Other selected
+UDP remains blocked. This does not parse or rewrite SIP/SDP and cannot
+guarantee working audio until the actual provider and client are tested.
+
 ## Lifecycle and ownership
 
 `enable` validates every namespace, captures a root-only network baseline,
@@ -87,7 +100,9 @@ periodically but never re-enables a disabled manifest.
 
 ## Protocol boundary
 
-Version `0.6.0-alpha.1` is IPv4/TCP-only. Proxy namespaces reject IPv6;
+Version `0.6.0-alpha.1` has an IPv4/TCP acceptance boundary, with opt-in UDP
+telephony still experimental and not accepted for general release. Proxy
+namespaces reject IPv6;
 tunnel preflight refuses a global IPv6 address because a safe client-scoped
 IPv6 model is not implemented. DoH/DoT and ECH remain limitations for arbitrary
 suffix observation, but do not bypass country/static CIDRs or already resolved

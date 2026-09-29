@@ -95,10 +95,18 @@ runtime, and a manually disabled runtime is never re-enabled by the watchdog.
 
 ## Safety boundary
 
-The supported alpha mode is IPv4/TCP. Country CIDRs, static CIDRs, and
-server-resolved exact domains do not depend on the client's DNS. Selected UDP
-and QUIC are rejected, and IPv6 is rejected for proxy-container sources or
-refused during tunnel preflight. Arbitrary suffix matching still depends on
+The established alpha mode is IPv4/TCP. An experimental, opt-in UDP path for a
+single containerized tunnel source and selected destination IPs/ports has
+passed one live SIP canary with incoming and outgoing calls and two-way audio.
+It is not enabled by default. Add explicit UDP options when creating the
+private configuration; thereafter the normal `enable`/`disable` switch manages
+TCP and UDP together. Exit-failure injection, excluded-client live proof, and
+reboot/recreation acceptance are still required before broad deployment. See
+the [UDP canary guide](docs/operations/udp-telephony-canary.md).
+Country CIDRs, static CIDRs, and server-resolved exact domains do not depend
+on the client's DNS. Other selected UDP and QUIC are rejected, and IPv6 is
+rejected for proxy-container sources or refused during tunnel preflight.
+Arbitrary suffix matching still depends on
 managed plain DNS, so browser DoH/DoT, ECH, and private resolvers make suffix
 routing best effort. Shared-CDN IPs can route neighboring names through the
 same egress.
@@ -127,6 +135,7 @@ and operational evidence belong under the ignored `source/` directory.
 - [Configuration reference](docs/developer/configuration.md)
 - [Architecture](docs/developer/architecture.md)
 - [Troubleshooting](docs/operations/troubleshooting.md)
+- [Experimental UDP telephony canary](docs/operations/udp-telephony-canary.md)
 - [Sanitized 0.5 validation report](docs/operations/validation-report-0.5.md)
 - [Production contract](docs/developer/production-contract.md)
 - [Security policy](SECURITY.md)

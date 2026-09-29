@@ -123,3 +123,25 @@ test('lifecycle operations are serialized and status avoids expensive network pr
 test('preflight reuses the pinned DNS helper image when it already exists', () => {
   assert.match(lifecycle, /docker image inspect "\$DNS_IMAGE"[^\n]+\|\| docker build/);
 });
+
+test('optional UDP routing has isolated TUN egress and owned fail-closed link lifecycle', () => {
+  const start = lifecycle.slice(lifecycle.indexOf('start_egress()'), lifecycle.indexOf('pin_tailscale_proxy_ip()'));
+  const link = lifecycle.slice(lifecycle.indexOf('stop_udp_link()'), lifecycle.indexOf('pin_tailscale_proxy_ip()'));
+  const apply = lifecycle.slice(lifecycle.indexOf('apply_runtime()'), lifecycle.indexOf('repair_applied_runtime()'));
+  assert.match(start, /TS_USERSPACE=\$userspace/);
+  assert.match(start, /--device \/dev\/net\/tun/);
+  assert.match(link, /ip link add "\$UDP_SOURCE_INTERFACE" type veth/);
+  assert.match(link, /ip rule add fwmark "\$UDP_ROUTE_MARK" lookup "\$UDP_ROUTE_TABLE"/);
+  assert.match(link, /nft -f - <"\$ARTIFACT_DIR\/udp-egress[.]nft"/);
+  assert.match(link, /ip route show "\$cidr".*169[.]254[.]253[.]0/);
+  assert.match(link, /ip rule add to "\$cidr" lookup main priority "\$UDP_EGRESS_RETURN_PRIORITY"/);
+  assert.match(link, /ip rule add to "\$proxy_subnet" lookup main priority "\$UDP_EGRESS_PROXY_PRIORITY"/);
+  assert.match(link, /ip -4 route get "\$\{cidr%\/\*\}"/);
+  assert.match(lifecycle, /ip -j -4 rule show/);
+  assert.match(lifecycle, /rule\.dstlen \?\? 32/);
+  assert.match(lifecycle, /String\(rule\.fwmark\)\.toLowerCase\(\)/);
+  assert.match(lifecycle, /source-rules\.json/);
+  assert.match(apply, /attach_sources; while[\s\S]*done < <\(groups_tsv\); start_udp_link;/);
+  assert.match(lifecycle, /stop_udp_link\n  while IFS=/);
+  assert.match(lifecycle, /if udp_enabled && ! udp_link_healthy; then/);
+});

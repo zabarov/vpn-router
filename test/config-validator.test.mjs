@@ -192,6 +192,28 @@ test('accepts a provider-neutral Linux interface strict egress', () => {
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 });
 
+test('requires a narrow, explicit UDP source and rejects QUIC and unsupported egresses', () => {
+  const config = validConfig();
+  config.schema_version = '3.0';
+  config.sources = [{ tag: 'awg', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.1.0/24' }, udp_clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] } }];
+  config.destination_sets['sip-provider'] = { ip_cidrs: ['198.51.100.0/24'] };
+  config.policies = config.policies.map(({ source: _source, ...policy }) => ({ ...policy, sources: ['awg'] }));
+  config.policies[0].destination_sets.push('sip-provider');
+  config.traffic_handling.udp_routing = { mode: 'tailscale_tun', source: 'awg', destination_sets: ['sip-provider'], destination_ports: ['5060', '10000-50000'] };
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  config.traffic_handling.udp_routing.destination_ports.push('443');
+  assert.match(validateConfig(config).errors.join('\n'), /must not include UDP\/443/);
+  config.traffic_handling.udp_routing.destination_ports.pop();
+  config.sources[0].udp_clients.addresses = ['10.8.2.2/32'];
+  assert.match(validateConfig(config).errors.join('\n'), /must be within source awg clients/);
+  config.sources[0].udp_clients.addresses = ['10.8.1.2/32'];
+  config.sources[0].udp_clients = { mode: 'subnet', subnet: '10.8.1.0/24' };
+  assert.match(validateConfig(config).errors.join('\n'), /udp_clients.mode address_list/);
+  config.sources[0].udp_clients = { mode: 'address_list', addresses: ['10.8.1.2/32'] };
+  config.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'example.org', port: 1080, healthcheck_url: 'https://example.com/' };
+  assert.match(validateConfig(config).errors.join('\n'), /requires a managed Tailscale/);
+});
+
 test('allows shared Tailscale for a host tunnel but rejects the same Linux egress interface', () => {
   const config = validConfig();
   config.sources[0] = {
