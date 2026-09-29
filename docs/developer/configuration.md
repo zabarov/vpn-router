@@ -167,10 +167,12 @@ The optional `traffic_handling.udp_routing` contract is for one containerized
 `tunnel_interface` source and the managed Tailscale egress only. It is not
 available for XRay/container-egress, an external SOCKS5 server, or a generic
 Linux interface. The default setup wizard does not enable it. The advanced
-`setup` command accepts `--udp-source-container`, `--udp-client-addresses`,
-`--udp-destination-cidrs`, and `--udp-destination-ports` together. The source's
-`udp_clients` must be an explicit address list inside its normal `clients`
-scope; begin with one `/32`.
+`setup` command accepts `--udp-source-container`, exactly one of
+`--udp-client-addresses` or `--udp-client-subnet`, and
+`--udp-destination-ports`. Optional `--udp-destination-cidrs` adds a separate
+strict provider set; without it, UDP uses the existing strict destination
+sets. The source's `udp_clients` must be inside its normal `clients` scope;
+begin with one `/32` before selecting the VPN subnet.
 
 ```yaml
 sources:
@@ -200,8 +202,13 @@ traffic_handling:
 from the provider's current published signaling and media ranges. SIP proxy
 addresses alone do not prove that RTP media uses the same IPs; check the
 provider documentation and a real call. UDP/443 remains rejected to prevent
-QUIC bypass. The managed Tailscale container uses a TUN interface in this mode
+QUIC bypass in this narrow mode. The separate `[all]` destination-port mode
+requires `udp_quic: route` and sends every UDP port, including QUIC, only to
+the selected destinations. The managed Tailscale container uses a TUN
+interface in this mode
 while retaining its SOCKS listener for TCP, so switching an existing runtime
 requires an outage-aware disable and re-enable. See the
 [canary procedure](../operations/udp-telephony-canary.md) and
-[generic example](../../examples/config.sip-udp.yaml).
+[generic example](../../examples/config.sip-udp.yaml). For the subnet/all-port
+variant, see the [regional UDP guide](../operations/regional-udp.md) and
+[example](../../examples/config.regional-udp.yaml).

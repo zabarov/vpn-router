@@ -96,15 +96,17 @@ runtime, and a manually disabled runtime is never re-enabled by the watchdog.
 ## Safety boundary
 
 The established alpha mode is IPv4/TCP. An experimental, opt-in UDP path for a
-single containerized tunnel source and selected destination IPs/ports has
-passed one live SIP canary with incoming and outgoing calls and two-way audio.
+single containerized tunnel source has passed one live SIP canary with incoming
+and outgoing calls and two-way audio. It can select one client or an explicit
+VPN subnet, and either chosen ports or all UDP ports **to selected destinations**.
 It is not enabled by default. Add explicit UDP options when creating the
 private configuration; thereafter the normal `enable`/`disable` switch manages
-TCP and UDP together. Exit-failure injection, excluded-client live proof, and
-reboot/recreation acceptance are still required before broad deployment. See
-the [UDP canary guide](docs/operations/udp-telephony-canary.md).
+TCP and UDP together. Live exit-failure, multi-client, and restart acceptance
+are still required before broad deployment. See the
+[regional UDP guide](docs/operations/regional-udp.md).
 Country CIDRs, static CIDRs, and server-resolved exact domains do not depend
-on the client's DNS. Other selected UDP and QUIC are rejected, and IPv6 is
+on the client's DNS. UDP not covered by the opt-in path is rejected at selected
+destinations; UDP/443 is routed only when the all-port path is enabled. IPv6 is
 rejected for proxy-container sources or refused during tunnel preflight.
 Arbitrary suffix matching still depends on
 managed plain DNS, so browser DoH/DoT, ECH, and private resolvers make suffix
@@ -136,6 +138,7 @@ and operational evidence belong under the ignored `source/` directory.
 - [Architecture](docs/developer/architecture.md)
 - [Troubleshooting](docs/operations/troubleshooting.md)
 - [Experimental UDP telephony canary](docs/operations/udp-telephony-canary.md)
+- [Regional UDP for a VPN subnet](docs/operations/regional-udp.md)
 - [Sanitized 0.5 validation report](docs/operations/validation-report-0.5.md)
 - [Production contract](docs/developer/production-contract.md)
 - [Security policy](SECURITY.md)

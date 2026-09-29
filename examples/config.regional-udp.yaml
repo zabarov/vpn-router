@@ -1,0 +1,60 @@
+schema_version: "3.0"
+
+sources:
+  - tag: vpn-in
+    type: tunnel_interface
+    namespace: container
+    container_name: example-vpn
+    interface: wg0
+    clients:
+      mode: subnet
+      subnet: 10.42.0.0/24
+    udp_clients:
+      mode: subnet
+      subnet: 10.42.0.0/24
+
+capture:
+  type: redirect
+  listen_port: 12345
+
+egresses:
+  - tag: direct
+    type: direct
+  - tag: regional-exit
+    type: tailscale_socks
+    auth_key_env: VPN_ROUTER_TAILSCALE_AUTH_KEY
+    exit_node: exit-node.example.ts.net
+    proxy_server: vpn-router-egress
+    proxy_port: 1055
+    healthcheck_url: https://example.com/
+
+policies:
+  - tag: selected
+    sources: [vpn-in]
+    destination_sets: [regional]
+    egress: regional-exit
+    failure_mode: block
+  - tag: default-direct
+    sources: [vpn-in]
+    destination_sets: [default]
+    egress: direct
+    failure_mode: direct
+
+destination_sets:
+  # Documentation-only range. Replace with country/domain/static selectors.
+  regional:
+    ip_cidrs: [198.51.100.0/24]
+
+traffic_handling:
+  udp_quic: route
+  ipv6: reject
+  dns_mode: managed
+  udp_routing:
+    mode: tailscale_tun
+    source: vpn-in
+    destination_sets: [regional]
+    destination_ports: [all]
+
+resources:
+  nftables_table: vpn_router
+  service_name: vpn-router

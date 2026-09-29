@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateNftablesConfig, generateNftablesDataUpdate } from '../src/nftables-generator.mjs';
+import { readFile } from 'node:fs/promises';
+import { parse } from 'yaml';
 
 const config = {
   schema_version: '1.0',
@@ -146,4 +148,27 @@ test('routes only an explicit UDP canary and provider set while rejecting other 
   assert.match(generated, /ip daddr @set_sip_provider_static udp dport \{ 5060, 10000-50000 \} meta mark 21077 oifname "vrudp0" counter return/);
   assert.match(generated, /ip daddr @set_sip_provider_static meta l4proto udp counter reject/);
   assert.match(generated, /ip saddr @source_amnezia_in_clients ip daddr @set_regional_services_static meta l4proto udp counter reject/);
+});
+
+test('marks every UDP port for the selected regional set and VPN subnet', async () => {
+  const broad = parse(await readFile(new URL('../examples/config.regional-udp.yaml', import.meta.url), 'utf8'));
+  const generated = generateNftablesConfig(broad);
+  assert.match(generated, /set source_vpn_in_udp_clients .*10\.42\.0\.0\/24/);
+  assert.match(generated, /ip saddr @source_vpn_in_udp_clients ip daddr @set_regional_static meta l4proto udp meta mark set 21077 counter return/);
+  assert.match(generated, /ip daddr @set_regional_static meta l4proto udp meta mark 21077 oifname "vrudp0" counter return/);
+  assert.match(generated, /ip daddr @set_regional_static meta l4proto udp counter reject/);
+  assert.doesNotMatch(generated, /udp dport \{/);
+});
+
+test('direct override retains priority over all-port regional UDP routing', async () => {
+  const broad = parse(await readFile(new URL('../examples/config.regional-udp.yaml', import.meta.url), 'utf8'));
+  broad.destination_sets['direct-overrides'] = { ip_cidrs: ['198.51.100.20/32'] };
+  broad.policies.unshift({
+    tag: 'always-direct', sources: ['vpn-in'], destination_sets: ['direct-overrides'],
+    egress: 'direct', failure_mode: 'direct'
+  });
+  const generated = generateNftablesConfig(broad);
+  const direct = generated.indexOf('ip daddr @set_direct_overrides_static counter return');
+  const regional = generated.indexOf('ip daddr @set_regional_static meta l4proto udp meta mark set 21077');
+  assert.ok(direct >= 0 && regional > direct);
 });

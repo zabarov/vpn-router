@@ -128,7 +128,9 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
     const udpSelectors = udpSource ? udpConfig.destination_sets.flatMap((name) =>
       destinationNftSets(config, { destination_sets: [name] }).map((nftSet) =>
         `iifname "${udpSource.interface}" ip saddr @${udpClientSetName(udpSource)} ip daddr @${nftSet}`)) : [];
-    const udpPorts = udpConfig ? `{ ${udpConfig.destination_ports.join(', ')} }` : null;
+    const udpMatch = udpConfig?.destination_ports.includes('all')
+      ? 'meta l4proto udp'
+      : udpConfig ? `udp dport { ${udpConfig.destination_ports.join(', ')} }` : null;
     lines.push('  chain capture_redirect {');
     lines.push('    type nat hook prerouting priority dstnat; policy accept;');
     if (managedDns) {
@@ -143,14 +145,14 @@ export function generateNftablesConfig(input, { sourceTag, routingData } = {}) {
     lines.push('  chain prerouting_guard {');
     lines.push('    type filter hook prerouting priority mangle; policy accept;');
     for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
-    for (const selector of udpSelectors) lines.push(`    ${selector} udp dport ${udpPorts} meta mark set ${UDP_ROUTING_MARK} counter return`);
+    for (const selector of udpSelectors) lines.push(`    ${selector} ${udpMatch} meta mark set ${UDP_ROUTING_MARK} counter return`);
     for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto udp counter reject`);
     lines.push('  }');
     lines.push('  chain forward_guard {');
     lines.push('    type filter hook forward priority filter; policy accept;');
     for (const { selector } of directSelectors) lines.push(`    ${selector} counter return`);
     for (const selector of udpSelectors) {
-      lines.push(`    ${selector} udp dport ${udpPorts} meta mark ${UDP_ROUTING_MARK} oifname "${UDP_SOURCE_INTERFACE}" counter return`);
+      lines.push(`    ${selector} ${udpMatch} meta mark ${UDP_ROUTING_MARK} oifname "${UDP_SOURCE_INTERFACE}" counter return`);
       lines.push(`    ${selector} meta l4proto udp counter reject`);
     }
     for (const { selector } of strictSelectors) lines.push(`    ${selector} meta l4proto tcp counter reject with tcp reset`);

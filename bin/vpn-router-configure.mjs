@@ -29,6 +29,7 @@ const defaults = {
   directCidrs: '',
   udpSourceContainer: '',
   udpClientAddresses: '',
+  udpClientSubnet: '',
   udpDestinationCidrs: '',
   udpDestinationPorts: '',
   serviceName: 'vpn-router',
@@ -62,6 +63,7 @@ const optionMap = new Map([
   ['--direct-cidrs', 'directCidrs'],
   ['--udp-source-container', 'udpSourceContainer'],
   ['--udp-client-addresses', 'udpClientAddresses'],
+  ['--udp-client-subnet', 'udpClientSubnet'],
   ['--udp-destination-cidrs', 'udpDestinationCidrs'],
   ['--udp-destination-ports', 'udpDestinationPorts'],
   ['--service-name', 'serviceName'],
@@ -97,8 +99,9 @@ Options:
   --direct-cidrs <cidr,cidr>
   --udp-source-container <name> (advanced, opt-in Tailscale TUN)
   --udp-client-addresses <client/32,client/32>
-  --udp-destination-cidrs <provider-cidr,provider-cidr>
-  --udp-destination-ports <port,first-last>
+  --udp-client-subnet <vpn-cidr> (instead of --udp-client-addresses)
+  --udp-destination-cidrs <provider-cidr,provider-cidr> (optional)
+  --udp-destination-ports <all|port,first-last>
   --service-name <name>
   --nftables-table <name>
   --non-interactive
@@ -306,10 +309,12 @@ export function buildConfig(values) {
     return source;
   });
 
-  const udpFields = ['udpSourceContainer', 'udpClientAddresses', 'udpDestinationCidrs', 'udpDestinationPorts'];
+  const udpFields = ['udpSourceContainer', 'udpClientAddresses', 'udpClientSubnet', 'udpDestinationCidrs', 'udpDestinationPorts'];
   const udpRequested = udpFields.some((field) => values.provided.has(field));
-  if (udpRequested && udpFields.some((field) => !values.provided.has(field) || !values[field].trim())) {
-    throw new Error('UDP routing requires --udp-source-container, --udp-client-addresses, --udp-destination-cidrs, and --udp-destination-ports together.');
+  if (udpRequested && (!values.udpSourceContainer.trim() || !values.udpDestinationPorts.trim() ||
+      values.provided.has('udpClientAddresses') === values.provided.has('udpClientSubnet') ||
+      (values.provided.has('udpDestinationCidrs') && !values.udpDestinationCidrs.trim()))) {
+    throw new Error('UDP routing requires --udp-source-container, exactly one of --udp-client-addresses or --udp-client-subnet, and --udp-destination-ports.');
   }
   if (udpRequested && values.egressType !== 'tailscale_socks') {
     throw new Error('UDP routing requires a managed Tailscale egress.');
@@ -319,7 +324,9 @@ export function buildConfig(values) {
     throw new Error('UDP source container must identify one selected container tunnel source.');
   }
   if (udpSource) {
-    udpSource.udp_clients = { mode: 'address_list', addresses: commaList(values.udpClientAddresses) };
+    udpSource.udp_clients = values.provided.has('udpClientSubnet')
+      ? { mode: 'subnet', subnet: values.udpClientSubnet }
+      : { mode: 'address_list', addresses: commaList(values.udpClientAddresses) };
   }
 
   let strictEgress;
@@ -356,7 +363,9 @@ export function buildConfig(values) {
     domain_suffixes: commaList(values.domains),
     ip_cidrs: []
   };
-  const udpDestination = udpRequested ? { ip_cidrs: commaList(values.udpDestinationCidrs) } : undefined;
+  const udpDestination = udpRequested && values.provided.has('udpDestinationCidrs')
+    ? { ip_cidrs: commaList(values.udpDestinationCidrs) } : undefined;
+  const udpSets = udpRequested ? (udpDestination ? ['udp-provider'] : ['strict-destinations']) : [];
   const directDestination = {
     exact_domains: commaList(values.directDomains),
     ip_cidrs: commaList(values.directCidrs)
@@ -365,7 +374,7 @@ export function buildConfig(values) {
   const policies = [];
   if (hasDirectOverrides) policies.push({ tag: 'always-direct', sources: sources.map((source) => source.tag), destination_sets: ['direct-overrides'], egress: 'direct', failure_mode: 'direct' });
   policies.push(
-    { tag: 'strict-destinations', sources: sources.map((source) => source.tag), destination_sets: ['strict-destinations', ...(udpRequested ? ['udp-provider'] : [])], egress: 'strict-egress', failure_mode: 'block' },
+    { tag: 'strict-destinations', sources: sources.map((source) => source.tag), destination_sets: ['strict-destinations', ...(udpDestination ? ['udp-provider'] : [])], egress: 'strict-egress', failure_mode: 'block' },
     { tag: 'default-direct', sources: sources.map((source) => source.tag), destination_sets: ['default'], egress: 'direct', failure_mode: 'direct' }
   );
   return {
@@ -380,14 +389,15 @@ export function buildConfig(values) {
     policies,
     destination_sets: {
       'strict-destinations': strictDestination,
-      ...(udpRequested ? { 'udp-provider': udpDestination } : {}),
+      ...(udpDestination ? { 'udp-provider': udpDestination } : {}),
       ...(hasDirectOverrides ? { 'direct-overrides': directDestination } : {})
     },
     traffic_handling: {
-      udp_quic: 'reject', ipv6: 'reject', dns_mode: 'managed',
+      udp_quic: udpRequested && commaList(values.udpDestinationPorts).includes('all') ? 'route' : 'reject',
+      ipv6: 'reject', dns_mode: 'managed',
       ...(udpRequested ? { udp_routing: {
         mode: 'tailscale_tun', source: udpSource.tag,
-        destination_sets: ['udp-provider'], destination_ports: commaList(values.udpDestinationPorts)
+        destination_sets: udpSets, destination_ports: commaList(values.udpDestinationPorts)
       } } : {})
     },
     resources: { nftables_table: values.nftablesTable, service_name: values.serviceName }

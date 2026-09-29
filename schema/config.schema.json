@@ -47,7 +47,7 @@
       "additionalProperties": false,
       "required": ["udp_quic", "ipv6", "dns_mode"],
       "properties": {
-        "udp_quic": { "const": "reject" },
+        "udp_quic": { "enum": ["reject", "route"] },
         "ipv6": { "const": "reject" },
         "dns_mode": { "enum": ["managed", "system"] },
         "udp_routing": {
@@ -58,7 +58,12 @@
             "mode": { "const": "tailscale_tun" },
             "source": { "$ref": "#/$defs/tag" },
             "destination_sets": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/tag" } },
-            "destination_ports": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[1-9][0-9]{0,4}(?:-[1-9][0-9]{0,4})?$" } }
+            "destination_ports": {
+              "oneOf": [
+                { "const": ["all"] },
+                { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[1-9][0-9]{0,4}(?:-[1-9][0-9]{0,4})?$" } }
+              ]
+            }
           }
         }
       }
@@ -125,15 +130,7 @@
         }
       ]
     },
-    "udpClients": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["mode", "addresses"],
-      "properties": {
-        "mode": { "const": "address_list" },
-        "addresses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[0-9.]+/32$" } }
-      }
-    },
+    "udpClients": { "$ref": "#/$defs/tunnelClients" },
     "source": {
       "oneOf": [
         {

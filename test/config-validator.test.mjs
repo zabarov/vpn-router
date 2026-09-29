@@ -192,7 +192,7 @@ test('accepts a provider-neutral Linux interface strict egress', () => {
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
 });
 
-test('requires a narrow, explicit UDP source and rejects QUIC and unsupported egresses', () => {
+test('requires an explicit UDP source and controls QUIC and unsupported egresses', () => {
   const config = validConfig();
   config.schema_version = '3.0';
   config.sources = [{ tag: 'awg', type: 'tunnel_interface', namespace: 'container', container_name: 'amnezia-awg2', interface: 'awg0', clients: { mode: 'subnet', subnet: '10.8.1.0/24' }, udp_clients: { mode: 'address_list', addresses: ['10.8.1.2/32'] } }];
@@ -202,14 +202,23 @@ test('requires a narrow, explicit UDP source and rejects QUIC and unsupported eg
   config.traffic_handling.udp_routing = { mode: 'tailscale_tun', source: 'awg', destination_sets: ['sip-provider'], destination_ports: ['5060', '10000-50000'] };
   assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
   config.traffic_handling.udp_routing.destination_ports.push('443');
-  assert.match(validateConfig(config).errors.join('\n'), /must not include UDP\/443/);
+  assert.match(validateConfig(config).errors.join('\n'), /UDP\/443 requires traffic_handling.udp_quic route/);
   config.traffic_handling.udp_routing.destination_ports.pop();
   config.sources[0].udp_clients.addresses = ['10.8.2.2/32'];
   assert.match(validateConfig(config).errors.join('\n'), /must be within source awg clients/);
   config.sources[0].udp_clients.addresses = ['10.8.1.2/32'];
   config.sources[0].udp_clients = { mode: 'subnet', subnet: '10.8.1.0/24' };
-  assert.match(validateConfig(config).errors.join('\n'), /udp_clients.mode address_list/);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  config.sources[0].udp_clients.subnet = '10.8.0.0/16';
+  assert.match(validateConfig(config).errors.join('\n'), /must be within source awg clients/);
   config.sources[0].udp_clients = { mode: 'address_list', addresses: ['10.8.1.2/32'] };
+  config.traffic_handling.udp_routing.destination_ports = ['all'];
+  assert.match(validateConfig(config).errors.join('\n'), /UDP\/443 requires traffic_handling.udp_quic route/);
+  config.traffic_handling.udp_quic = 'route';
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  config.traffic_handling.udp_routing.destination_ports = ['all', '5060'];
+  assert.match(validateConfig(config).errors.join('\n'), /must be \[all\]/);
+  config.traffic_handling.udp_routing.destination_ports = ['all'];
   config.egresses[1] = { tag: 'regional-exit', type: 'socks5', server: 'example.org', port: 1080, healthcheck_url: 'https://example.com/' };
   assert.match(validateConfig(config).errors.join('\n'), /requires a managed Tailscale/);
 });

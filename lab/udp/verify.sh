@@ -27,6 +27,8 @@ node "$repo_dir/bin/vpn-router.mjs" render-udp-egress --config "$repo_dir/exampl
 docker exec -d "$name" ip netns exec exit python3 /repo/lab/udp/echo.py exit 198.51.100.10 5060
 docker exec -d "$name" ip netns exec exit python3 /repo/lab/udp/echo.py exit 198.51.100.10 5061
 docker exec -d "$name" ip netns exec exit python3 /repo/lab/udp/echo.py exit 198.51.100.10 10000
+docker exec -d "$name" ip netns exec exit python3 /repo/lab/udp/echo.py exit 198.51.100.10 443
+docker exec -d "$name" ip netns exec exit python3 /repo/lab/udp/echo.py exit 198.51.100.10 65000
 docker exec -d "$name" ip netns exec direct python3 /repo/lab/udp/echo.py direct 192.0.2.10 5060
 docker exec -d "$name" ip netns exec direct python3 /repo/lab/udp/echo.py leak 198.51.100.10 5060
 docker exec -d "$name" ip netns exec underlay python3 /repo/lab/udp/echo.py leak 198.51.100.10 5060
@@ -37,9 +39,9 @@ docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.
 docker exec "$name" ip netns exec source ip rule add fwmark 21077 lookup 5255 priority 110
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 5060 exit:probe
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 10000 exit:probe
-docker exec "$name" ip netns exec egress ip rule del to 10.42.0.2/32 priority 500
+docker exec "$name" ip netns exec egress ip rule del to 10.42.0.0/24 priority 500
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 5060 blocked
-docker exec "$name" ip netns exec egress ip rule add to 10.42.0.2/32 lookup main priority 500
+docker exec "$name" ip netns exec egress ip rule add to 10.42.0.0/24 lookup main priority 500
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 192.0.2.10 5060 direct:probe
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.3 198.51.100.10 5060 blocked
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 5061 blocked
@@ -48,6 +50,24 @@ docker exec "$name" ip netns exec egress ip link set tailscale0 down
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 5060 blocked
 docker exec "$name" ip netns exec source ip rule del priority 110
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 5060 blocked
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 192.0.2.10 5060 direct:probe
+
+# Replace only the disposable project tables for the all-client/all-port mode.
+docker exec "$name" ip netns exec source ip rule add fwmark 21077 lookup 5255 priority 110
+docker exec "$name" ip netns exec egress ip link set tailscale0 up
+docker exec "$name" ip netns exec egress ip route replace table 52 default via 100.64.0.1 dev tailscale0
+docker exec "$name" ip netns exec source nft delete table inet vpn_router
+docker exec "$name" ip netns exec egress nft delete table inet vpn_router_udp
+node "$repo_dir/bin/vpn-router.mjs" render-nftables --config "$repo_dir/examples/config.regional-udp.yaml" |
+  docker exec -i "$name" ip netns exec source nft -f -
+node "$repo_dir/bin/vpn-router.mjs" render-udp-egress --config "$repo_dir/examples/config.regional-udp.yaml" |
+  docker exec -i "$name" ip netns exec egress nft -f -
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 198.51.100.10 443 exit:probe
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.3 198.51.100.10 5061 exit:probe
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.3 198.51.100.10 65000 exit:probe
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 192.0.2.10 5060 direct:probe
+docker exec "$name" ip netns exec egress ip link set tailscale0 down
+docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.3 198.51.100.10 65000 blocked
 docker exec "$name" ip netns exec client python3 /repo/lab/udp/probe.py 10.42.0.2 192.0.2.10 5060 direct:probe
 
 echo 'udp_lab=PASS'

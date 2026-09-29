@@ -37,8 +37,9 @@ The configuration must retain the strict `failure_mode: block` policy and the
 default-direct policy.
 
 For a new private configuration, `vpn-router setup` also accepts an explicit
-advanced UDP option group. All four options are required together; no provider
-range or port is inferred from a SIP hostname:
+advanced UDP option group. A source, one client scope, and the destination
+ports are required together; no provider range or port is inferred from a SIP
+hostname. This narrow example also supplies an explicit provider range:
 
 ```sh
 sudo vpn-router setup --non-interactive \
@@ -108,6 +109,8 @@ pool to compensate for one failed account.
 ## Current limits
 
 - IPv4 only; no broad UDP or QUIC passthrough.
+- A separate [regional UDP mode](regional-udp.md) can route every UDP port for
+  selected destinations and an explicit VPN subnet; it is not yet live-accepted.
 - One containerized tunnel source, one Tailscale exit, explicitly listed client
   addresses and destination ports.
 - Provider media can use different IPs than the registrar. Update the

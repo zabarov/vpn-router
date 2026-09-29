@@ -312,3 +312,19 @@ test('UDP setup rejects partial options and unsupported egresses', () => {
   assert.throws(() => buildConfig(parseArgs([...options, '--egress-type', 'socks5'])), /requires a managed Tailscale egress/);
   assert.throws(() => buildConfig(parseArgs([...options, '--udp-source-container', 'missing'])), /must identify one selected container tunnel source/);
 });
+
+test('setup can select the VPN subnet and all UDP ports without provider-specific CIDRs', () => {
+  const values = parseArgs([
+    '--source-container', 'vpn-source', '--source-interface', 'awg0',
+    '--client-scope', 'subnet', '--client-subnet', '10.42.0.0/24',
+    '--udp-source-container', 'vpn-source', '--udp-client-subnet', '10.42.0.0/24',
+    '--udp-destination-ports', 'all'
+  ]);
+  const config = buildConfig(values);
+  assert.deepEqual(validateConfig(config), { valid: true, errors: [] });
+  assert.deepEqual(config.sources[0].udp_clients, { mode: 'subnet', subnet: '10.42.0.0/24' });
+  assert.deepEqual(config.traffic_handling.udp_routing.destination_sets, ['strict-destinations']);
+  assert.deepEqual(config.traffic_handling.udp_routing.destination_ports, ['all']);
+  assert.equal(config.traffic_handling.udp_quic, 'route');
+  assert.equal(config.destination_sets['udp-provider'], undefined);
+});

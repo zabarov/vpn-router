@@ -15,3 +15,15 @@ test('isolated UDP egress accepts only configured canary and ports towards tails
   assert.match(generated, /ip saddr @clients oifname "tailscale0" meta l4proto udp udp dport \{ 5060, 10000-50000 \} counter masquerade/);
   assert.doesNotMatch(generated, /flush ruleset|chain output/);
 });
+
+test('all-port UDP egress accepts the configured VPN subnet only through Tailscale', async () => {
+  const config = parse(await readFile(new URL('../examples/config.regional-udp.yaml', import.meta.url), 'utf8'));
+  const plan = buildRuntimePlan(config);
+  assert.deepEqual(plan.udp_routing.client_cidrs, ['10.42.0.0/24']);
+  const generated = generateUdpEgressNft(config);
+  assert.match(generated, /set clients .*10\.42\.0\.0\/24/);
+  assert.match(generated, /iifname "vrudp1" ip saddr @clients meta l4proto udp oifname "tailscale0" counter accept/);
+  assert.match(generated, /iifname "vrudp1" counter reject/);
+  assert.match(generated, /ip saddr @clients oifname "tailscale0" meta l4proto udp counter masquerade/);
+  assert.doesNotMatch(generated, /udp dport/);
+});

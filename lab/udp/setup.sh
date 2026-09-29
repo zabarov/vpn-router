@@ -22,8 +22,8 @@ ip netns exec source ip link set vrudp0 up
 ip netns exec egress ip link set vrudp1 up
 ip netns exec source ip route add table 5255 default via 169.254.253.1 dev vrudp0
 ip netns exec source ip rule add fwmark 21077 lookup 5255 priority 110
-ip netns exec egress ip route add 10.42.0.2/32 via 169.254.253.0 dev vrudp1
-ip netns exec egress ip rule add to 10.42.0.2/32 lookup main priority 500
+ip netns exec egress ip route add 10.42.0.0/24 via 169.254.253.0 dev vrudp1
+ip netns exec egress ip rule add to 10.42.0.0/24 lookup main priority 500
 
 ip link add eg-proxy type veth peer name proxy0
 ip link set eg-proxy netns egress

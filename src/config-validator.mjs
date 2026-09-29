@@ -427,9 +427,8 @@ export function validateConfig(input) {
     errors.push('traffic_handling must be an object');
   } else {
     rejectUnknownKeys(handling, trafficHandlingFields, 'traffic_handling', errors);
-    for (const key of ['udp_quic', 'ipv6']) {
-      if (handling[key] !== 'reject') errors.push(`traffic_handling.${key} must be reject in the IPv4/TCP MVP`);
-    }
+    if (handling.ipv6 !== 'reject') errors.push('traffic_handling.ipv6 must be reject');
+    if (!['reject', 'route'].includes(handling.udp_quic)) errors.push('traffic_handling.udp_quic must be reject or route');
     if (!['managed', 'system'].includes(handling.dns_mode)) errors.push('traffic_handling.dns_mode must be managed or system');
     const hasStrictDomains = strictPolicies.some((policy) => (policy.destination_sets ?? []).some((name) => name !== 'default' && (config.destination_sets?.[name]?.domain_suffixes ?? []).length > 0));
     if (hasStrictDomains && handling.dns_mode !== 'managed') {
@@ -449,7 +448,6 @@ export function validateConfig(input) {
           if (source.udp_clients === undefined) errors.push('UDP routing source requires an explicit udp_clients scope');
           else {
             validateClientScope({ tag: source.tag, type: source.type, clients: source.udp_clients }, errors);
-            if (source.udp_clients.mode !== 'address_list') errors.push('UDP routing requires udp_clients.mode address_list with explicit /32 addresses');
             if (isObject(source.udp_clients) && (source.udp_clients.mode === 'address_list' || source.udp_clients.mode === 'subnet')) {
               const parentCidrs = sourceClientScope(source).cidrs;
               const udpCidrs = sourceClientScope({ clients: source.udp_clients }).cidrs;
@@ -474,18 +472,22 @@ export function validateConfig(input) {
           }
         }
         if (!Array.isArray(udp.destination_ports) || udp.destination_ports.length === 0 ||
-            udp.destination_ports.some((port) => !validPortRange(port))) {
-          errors.push('traffic_handling.udp_routing.destination_ports must contain valid UDP port or port-range strings');
+            udp.destination_ports.some((port) => port !== 'all' && !validPortRange(port)) ||
+            (udp.destination_ports.includes('all') && udp.destination_ports.length !== 1)) {
+          errors.push('traffic_handling.udp_routing.destination_ports must be [all] or valid UDP port/range strings');
         } else {
           rejectDuplicates(udp.destination_ports, 'traffic_handling.udp_routing.destination_ports', errors);
-          if (udp.destination_ports.some((entry) => {
+          const includesQuic = udp.destination_ports.includes('all') || udp.destination_ports.some((entry) => {
             const [first, last = first] = entry.split('-').map(Number);
             return first <= 443 && last >= 443;
-          })) errors.push('traffic_handling.udp_routing must not include UDP/443 while QUIC is rejected');
+          });
+          if (includesQuic && handling.udp_quic !== 'route') errors.push('UDP/443 requires traffic_handling.udp_quic route');
+          if (!includesQuic && handling.udp_quic === 'route') errors.push('traffic_handling.udp_quic route requires UDP/443 in destination_ports');
         }
         if (activeStrictEgress?.type !== 'tailscale_socks') errors.push('UDP routing currently requires a managed Tailscale strict egress');
       }
     } else {
+      if (handling.udp_quic === 'route') errors.push('traffic_handling.udp_quic route requires udp_routing');
       for (const source of config.sources.filter((candidate) => candidate.udp_clients !== undefined)) {
         errors.push(`source ${source.tag} cannot declare udp_clients without traffic_handling.udp_routing`);
       }
