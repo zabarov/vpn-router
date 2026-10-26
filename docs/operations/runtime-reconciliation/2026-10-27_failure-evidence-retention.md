@@ -42,3 +42,6 @@ shared lifecycle lock during observation. The updater now waits for that lock
 for up to 120 seconds instead of immediately failing; its systemd deadline
 remains 180 seconds. A timeout still reports a failed refresh without
 replacing the last-known-good routing data.
+On the reference deployment, a controlled lock hold delayed the updater for
+five seconds; the update then completed successfully and full routing
+verification still passed.
