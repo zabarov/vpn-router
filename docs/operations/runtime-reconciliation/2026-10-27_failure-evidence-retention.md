@@ -1,7 +1,7 @@
 # Runtime reconciliation: failure-evidence retention
 
 Date: 2026-10-27
-Status: pending_promotion
+Status: reconciled
 
 ## Incident and containment
 
@@ -29,8 +29,10 @@ handling of historical snapshots from older installations.
 
 ## Verification and remaining gate
 
-Local unit, schema, shell, English-only, secret, and clean-host installation
-checks passed. Live release promotion and a new external-client connection
-test remain required before this event can be marked reconciled. The
-repository does not claim that server-side verification alone proves a VPN
-client session.
+Local unit (141/141), schema, shell, English-only, secret, and clean-host
+installation checks passed. The matching code was installed on the reference
+deployment, and its helper hash matched the committed source. Docker restored
+the original source and router containers; fresh routing data, full egress
+verification, unchanged VPN configuration and host routes, and a healthy
+watchdog run were observed. A new external-client connection test remains
+pending and is not implied by server-side verification.
