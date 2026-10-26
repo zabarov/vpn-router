@@ -4,6 +4,11 @@ All notable changes are documented here.
 
 ## 0.6.0-alpha.1 - Unreleased
 
+- Bound root-only lifecycle failure evidence to eight generated snapshots and
+  32 KiB per captured command. Capture container state without full Docker
+  environment data, preventing repeated watchdog failures from exhausting a
+  small VPN host filesystem. Existing historical snapshots require separate
+  operator-reviewed cleanup.
 - Add an experimental, opt-in UDP telephony canary for one tunnel source and a
   managed Tailscale TUN exit, with isolated route/forward guards, an explicit
   client return rule, and disposable packet-path tests. One live client passed

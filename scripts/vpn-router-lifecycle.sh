@@ -7,6 +7,9 @@ readonly DNS_IMAGE='vpn-router-dns:0.6.0-alpha.1'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
+# The shared helper is checked separately by check-shell.sh.
+# shellcheck disable=SC1091
+source "$script_dir/vpn-router-failure-evidence.sh"
 node_bin=${VPN_ROUTER_NODE:-node}
 
 command_name=${1-}
@@ -616,17 +619,18 @@ capture_failure_evidence() {
   local failure_dir timestamp name
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   mkdir -p "$RUNTIME_DIR/failures"
+  failure_evidence_prune "$RUNTIME_DIR/failures"
   failure_dir=$(mktemp -d "$RUNTIME_DIR/failures/$timestamp.XXXXXX")
   chmod 700 "$failure_dir"
   for name in "$CAPTURE_NAME" "$DNS_NAME" "$EGRESS_NAME"; do
     if container_exists "$name"; then
-      docker inspect --format \
-        'name={{.Name}} id={{.Id}} image={{.Image}} running={{.State.Running}} status={{.State.Status}} exit={{.State.ExitCode}}' \
-        "$name" >"$failure_dir/$name.status.txt" 2>&1 || true
-      docker logs --tail 300 "$name" >"$failure_dir/$name.log" 2>&1 || true
+      failure_evidence_capture "$failure_dir/$name.status.txt" docker inspect --format \
+        'name={{.Name}} id={{.Id}} image={{.Image}} running={{.State.Running}} status={{.State.Status}} exit={{.State.ExitCode}}' "$name"
+      failure_evidence_capture "$failure_dir/$name.log" docker logs --tail 100 "$name"
     fi
   done
   chmod 600 "$failure_dir"/* 2>/dev/null || true
+  failure_evidence_prune "$RUNTIME_DIR/failures"
 }
 
 verify_internal() {

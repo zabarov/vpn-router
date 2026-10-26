@@ -10,6 +10,7 @@ bash -n \
   scripts/vpn-router-watchdog.sh \
   scripts/vpn-router-source-lifecycle.sh \
   scripts/vpn-router-lifecycle.sh \
+  scripts/vpn-router-failure-evidence.sh \
   lab/linux-interface/verify.sh
 
 sh -n \
@@ -29,6 +30,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     scripts/vpn-router-watchdog.sh \
     scripts/vpn-router-source-lifecycle.sh \
     scripts/vpn-router-lifecycle.sh \
+    scripts/vpn-router-failure-evidence.sh \
     lab/linux-interface/verify.sh \
     scripts/preflight-amneziawg2.sh \
     scripts/prepare-amneziawg2-artifacts.sh \

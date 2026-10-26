@@ -10,6 +10,7 @@
 - [0.5 multi-source validation report](operations/validation-report-0.5.md)
 - [AmneziaWG2 adapter](operations/amneziawg2-sidecar.md)
 - [Deployment ownership and rollback contract](operations/deployment-contract.md)
+- [Runtime reconciliation journal](operations/runtime-reconciliation/README.md)
 
 The quick start is for a server owner who installed Amnezia through its normal
 desktop application. The installation guide is the advanced path for other VPN

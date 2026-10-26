@@ -7,6 +7,9 @@ readonly DNS_IMAGE='vpn-router-dns:0.6.0-alpha.1'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(cd -- "$script_dir/.." && pwd)
+# The shared helper is checked separately by check-shell.sh.
+# shellcheck disable=SC1091
+source "$script_dir/vpn-router-failure-evidence.sh"
 node_bin=${VPN_ROUTER_NODE:-node}
 
 command_name=${1-}
@@ -631,20 +634,21 @@ healthcheck_group() {
 capture_failure_diagnostics() {
   local reason=$1 dir tag namespace container source_tag capture dns
   mkdir -p "$RUNTIME_DIR/failures"; chmod 700 "$RUNTIME_DIR/failures"
+  failure_evidence_prune "$RUNTIME_DIR/failures"
   dir=$(mktemp -d "$RUNTIME_DIR/failures/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
   chmod 700 "$dir"
   printf '%s\n' "$reason" >"$dir/reason.txt"
-  docker ps -a --no-trunc >"$dir/docker-ps.txt" 2>&1 || true
+  failure_evidence_capture "$dir/docker-ps.txt" docker ps -a --no-trunc
   while IFS=$'\t' read -r tag namespace container source_tag capture dns; do
-    docker inspect "$capture" >"$dir/$tag-capture.inspect.json" 2>&1 || true
-    docker logs "$capture" >"$dir/$tag-capture.log" 2>&1 || true
-    docker inspect "$dns" >"$dir/$tag-dns.inspect.json" 2>&1 || true
-    docker logs "$dns" >"$dir/$tag-dns.log" 2>&1 || true
-    group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE" >"$dir/$tag-nftables.txt" 2>&1 || true
+    failure_evidence_capture "$dir/$tag-capture.inspect.json" docker inspect --format '{{json .State}}' "$capture"
+    failure_evidence_capture "$dir/$tag-capture.log" docker logs --tail 100 "$capture"
+    failure_evidence_capture "$dir/$tag-dns.inspect.json" docker inspect --format '{{json .State}}' "$dns"
+    failure_evidence_capture "$dir/$tag-dns.log" docker logs --tail 100 "$dns"
+    failure_evidence_capture "$dir/$tag-nftables.txt" group_exec "$namespace" "$container" nft list table inet "$NFTABLES_TABLE"
   done < <(groups_tsv)
   if [[ "$STRICT_EGRESS_TYPE" == tailscale_socks ]]; then
-    docker inspect "$EGRESS_NAME" >"$dir/egress.inspect.json" 2>&1 || true
-    docker logs "$EGRESS_NAME" >"$dir/egress.log" 2>&1 || true
+    failure_evidence_capture "$dir/egress.inspect.json" docker inspect --format '{{json .State}}' "$EGRESS_NAME"
+    failure_evidence_capture "$dir/egress.log" docker logs --tail 100 "$EGRESS_NAME"
     if udp_enabled && container_running "$EGRESS_NAME"; then
       udp_egress_exec ip -j rule show >"$dir/egress-rules.json" 2>&1 || true
       udp_egress_exec ip -j route show table main >"$dir/egress-main-routes.json" 2>&1 || true
@@ -656,6 +660,7 @@ capture_failure_diagnostics() {
     udp_source_exec ip -j -4 route show table "$UDP_ROUTE_TABLE" >"$dir/source-udp-routes.json" 2>&1 || true
   fi
   chmod 600 "$dir"/*
+  failure_evidence_prune "$RUNTIME_DIR/failures"
   printf 'failure_evidence=%s\n' "$dir" >&2
 }
 

@@ -45,6 +45,33 @@ but one or more owned resources or namespace identities no longer match. A
 healthy container source reports `namespace_identity=matched`. Do not widen
 the client scope while drift exists.
 
+## The host disk is full and the source VPN will not start
+
+Check the filesystem before restarting or recreating any VPN container:
+
+```sh
+df -h /
+sudo du -sh /var/lib/vpn-router/runtime/failures
+sudo docker ps -a
+```
+
+Failure snapshots are root-only diagnostics, not the active configuration or
+Tailscale state. Current lifecycle versions retain at most eight generated
+snapshots and cap each captured command output at 32 KiB. This prevents a
+repeated watchdog failure from copying an unbounded container log every minute.
+Older installed releases did not impose these limits; their existing snapshots
+are not removed merely by installing the fix. Before deleting old snapshots,
+inventory the exact directory, preserve representative evidence and any needed
+configuration backup, and use a separately approved, scoped cleanup. Never run
+`docker system prune` or remove Amnezia profiles, Docker metadata, or Tailscale
+state to make space.
+
+After freeing space, verify that Docker loads the original Amnezia container
+and that its VPN port is listening. If routing data has become stale during the
+outage, run `sudo vpn-router data-update` before `reconcile`. A healthy router
+status does not by itself prove a client handshake: reconnect one VPN client
+and test an ordinary site plus a selected destination.
+
 ## Preflight never becomes ready
 
 Check that Docker is running, the configured container source is healthy when
