@@ -25,7 +25,7 @@ config_path=$(cd -- "$(dirname -- "$config_path")" && pwd)/$(basename -- "$confi
 command -v flock >/dev/null
 lock_key=$(printf '%s' "$config_path" | sha256sum | awk '{print substr($1,1,16)}')
 exec 9>"/run/lock/vpn-router-$lock_key.lock"
-flock -n 9 || { echo 'data-update=FAIL: another lifecycle operation is running' >&2; exit 1; }
+flock -w 120 9 || { echo 'data-update=FAIL: timed out waiting for another lifecycle operation' >&2; exit 1; }
 
 eval "$("$node_bin" "$repo_dir/bin/vpn-router.mjs" render-runtime-env --config "$config_path")"
 [[ "$CONFIG_SCHEMA_VERSION" == 3.0 ]] || { echo 'data-update=NOT_APPLICABLE'; exit 0; }

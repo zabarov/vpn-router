@@ -36,3 +36,9 @@ the original source and router containers; fresh routing data, full egress
 verification, unchanged VPN configuration and host routes, and a healthy
 watchdog run were observed. A new external-client connection test remains
 pending and is not implied by server-side verification.
+
+An overlapping watchdog and data-refresh timer briefly contended for the
+shared lifecycle lock during observation. The updater now waits for that lock
+for up to 120 seconds instead of immediately failing; its systemd deadline
+remains 180 seconds. A timeout still reports a failed refresh without
+replacing the last-known-good routing data.

@@ -59,7 +59,8 @@ test('installed command exposes configuration, lifecycle, service, and routing s
 });
 
 test('routing data updater is private, transactional, and systemd-managed', () => {
-  assert.match(dataUpdate, /flock -n/);
+  assert.match(dataUpdate, /flock -w 120 9/);
+  assert.match(dataUpdate, /timed out waiting for another lifecycle operation/);
   assert.match(dataUpdate, /render-data-update/);
   assert.match(dataUpdate, /render-data-restore/);
   assert.match(dataUpdate, /previous data was restored/);
